@@ -56,7 +56,7 @@ vercel.com → Add New → Project → `easy-seo-meta` রিপো Import।
 | SHOPIFY_API_KEY | ধাপ ২-এর client_id |
 | SHOPIFY_API_SECRET | ধাপ ২-এর client secret |
 | SHOPIFY_APP_URL | https://easy-seo-meta.vercel.app |
-| SCOPES | read_products,write_products,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_files,write_files |
+| SCOPES | read_products,write_products,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_files,write_files,write_app_proxy |
 | DATABASE_URL | Neon pooled |
 | DATABASE_URL_UNPOOLED | Neon direct |
 | SHOPIFY_BILLING_TEST | true (রিভিউ পাস হলে মুছে দিন → আসল চার্জ) |
