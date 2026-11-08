@@ -1,8 +1,9 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { redirect } from "@remix-run/node";
+import { useEffect } from "react";
 import { useFetcher, useLoaderData } from "@remix-run/react";
 import { Page, Layout, Card, BlockStack, InlineGrid, InlineStack, Text, Button, Badge, List, Box } from "@shopify/polaris";
-import { TitleBar } from "@shopify/app-bridge-react";
+import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { BILLING_PLANS, FREE_PLAN, PLAN_FEATURES, PLAN_ORDER, billingPlan, type PlanName } from "../lib/plans";
 import { BILLING_TEST, forgetCachedPlan, getActiveSubscription } from "../models/billing.server";
@@ -20,26 +21,52 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return { active: plan, activeKey: key, isTest: BILLING_TEST };
 };
 
+/** Shopify's own reason, e.g. the app's distribution isn't set to public yet. */
+function billingErrorText(error: any): string {
+  const data = error?.errorData;
+  const messages: string[] = [];
+  const collect = (v: any) => {
+    if (!v) return;
+    if (Array.isArray(v)) v.forEach(collect);
+    else if (typeof v === "object") (v.message ? messages.push(String(v.message)) : Object.values(v).forEach(collect));
+  };
+  collect(data);
+  return messages.join(" ") || error?.message || "Shopify couldn't start the subscription.";
+}
+
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { billing, session } = await authenticate.admin(request);
   forgetCachedPlan(session.shop);
   const key = String((await request.formData()).get("plan"));
-  if (key === FREE_PLAN) {
-    const { appSubscriptions } = await billing.check({ plans: BILLING_PLANS.map((p) => p.key) as never[], isTest: BILLING_TEST });
-    for (const sub of appSubscriptions ?? []) {
-      await billing.cancel({ subscriptionId: sub.id, isTest: BILLING_TEST, prorate: true });
+  try {
+    if (key === FREE_PLAN) {
+      const { appSubscriptions } = await billing.check({ plans: BILLING_PLANS.map((p) => p.key) as never[], isTest: BILLING_TEST });
+      for (const sub of appSubscriptions ?? []) {
+        await billing.cancel({ subscriptionId: sub.id, isTest: BILLING_TEST, prorate: true });
+      }
+      return redirect("/app/plans");
     }
-    return redirect("/app/plans");
+    if (!billingPlan(key)) return { error: "Unknown plan." };
+    // On success this throws a redirect to Shopify's approval page.
+    await billing.request({ plan: key as never, isTest: BILLING_TEST });
+    return null;
+  } catch (error) {
+    if (error instanceof Response) throw error;
+    const reason = billingErrorText(error);
+    console.error(`Easy SEO billing: ${key} failed for ${session.shop}:`, reason, JSON.stringify((error as any)?.errorData ?? null));
+    return { error: `Shopify said: ${reason}` };
   }
-  if (!billingPlan(key)) return { error: "Unknown plan." };
-  await billing.request({ plan: key as never, isTest: BILLING_TEST });
-  return null;
 };
 
 export default function PlansPage() {
   const { active, activeKey, isTest } = useLoaderData<typeof loader>();
-  const fetcher = useFetcher();
+  const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
+  const shopify = useAppBridge();
+  useEffect(() => {
+    const d = fetcher.data as any;
+    if (fetcher.state === "idle" && d?.error) shopify.toast.show(d.error, { isError: true, duration: 10000 });
+  }, [fetcher.state, fetcher.data, shopify]);
   return (
     <Page>
       <TitleBar title="Plans" />
