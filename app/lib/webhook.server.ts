@@ -24,7 +24,7 @@ import { authenticate } from "../shopify.server";
  */
 function hmacMatches(rawBody: string, headerValue: string | null): boolean {
   if (!headerValue) return false;
-  const secret = process.env.SHOPIFY_API_SECRET || "";
+  const secret = process.env.SHOPIFY_API_SECRET?.trim() || "";
   if (!secret) return false;
 
   const computed = createHmac("sha256", secret).update(rawBody, "utf8").digest();

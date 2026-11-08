@@ -42,10 +42,13 @@ function resolveAppUrl(): string {
 
 const createShopify = () =>
   shopifyApp({
-    apiKey: process.env.SHOPIFY_API_KEY,
-    apiSecretKey: process.env.SHOPIFY_API_SECRET || "",
+    // Trimmed: a value pasted into the host's multi-line field can carry a
+    // trailing newline, and the library compares the session token's audience
+    // to apiKey exactly ("Session token had invalid API key").
+    apiKey: process.env.SHOPIFY_API_KEY?.trim(),
+    apiSecretKey: process.env.SHOPIFY_API_SECRET?.trim() || "",
     apiVersion: ApiVersion.July26,
-    scopes: process.env.SCOPES?.split(","),
+    scopes: process.env.SCOPES?.split(",").map((s) => s.trim()).filter(Boolean),
     appUrl: resolveAppUrl(),
     authPathPrefix: "/auth",
     sessionStorage: new PrismaSessionStorage(prisma),
