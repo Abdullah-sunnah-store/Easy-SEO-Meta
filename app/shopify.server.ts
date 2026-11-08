@@ -3,6 +3,7 @@ import {
   ApiVersion,
   AppDistribution,
   BillingInterval,
+  LogSeverity,
   shopifyApp,
 } from "@shopify/shopify-app-remix/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
@@ -48,6 +49,13 @@ const createShopify = () =>
     appUrl: resolveAppUrl(),
     authPathPrefix: "/auth",
     sessionStorage: new PrismaSessionStorage(prisma),
+    // SHOPIFY_DEBUG=1 on the host turns on the library's debug log, which is the
+    // only place it says WHY a session token or token exchange was rejected
+    // (wrong client secret, wrong client ID, expired token). Leave it off
+    // otherwise: it logs token payloads.
+    logger: {
+      level: process.env.SHOPIFY_DEBUG === "1" ? LogSeverity.Debug : LogSeverity.Info,
+    },
     distribution: AppDistribution.AppStore,
     // One entry per sellable subscription (monthly and yearly of each tier),
     // generated from the same list the Plans page renders.
