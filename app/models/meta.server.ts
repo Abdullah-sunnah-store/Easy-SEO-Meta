@@ -7,7 +7,7 @@
 import prisma from "../db.server";
 import { gql, userErrorText, type AdminClient, AdminError } from "./admin.server";
 import { refreshItem } from "./scan.server";
-import { AiError, generateMeta, loadSource } from "./ai.server";
+import { AiError, generateAlt, generateMeta, loadSource } from "./ai.server";
 import {
   DESCRIPTION_MAX,
   TITLE_MAX,
@@ -280,5 +280,75 @@ export async function applyAiBatch(args: {
   const more = stopped
     ? 0
     : await prisma.auditItem.count({ where: { ...where, id: { ...(where.id ?? {}), gt: lastId } } });
+  return { done: more === 0, applied, failed, lastId, limited: false, stopped };
+}
+
+/**
+ * AI alt text for every image that has none: the model looks at each image.
+ * Same shape as applyAiBatch — time-boxed, paced, cursor-driven, and a quota
+ * error waits once before stopping with the work so far kept.
+ */
+export async function applyAiAltBatch(args: {
+  admin: AdminClient;
+  shop: string;
+  afterId: string;
+  allowance: number;
+  budgetMs?: number;
+  paceMs?: number;
+}) {
+  const { admin, shop } = args;
+  const started = Date.now();
+  const budget = args.budgetMs ?? 20_000;
+  const pace = args.paceMs ?? 1_200;
+  const where: any = { shop, alt: "" };
+  if (args.afterId) where.id = { gt: args.afterId };
+  const take = Math.max(0, Math.min(10, args.allowance));
+  if (take === 0) return { done: true, applied: 0, failed: 0, lastId: args.afterId, limited: true, stopped: "" };
+  const images = await prisma.auditImage.findMany({ where, orderBy: { id: "asc" }, take });
+  if (!images.length) return { done: true, applied: 0, failed: 0, lastId: args.afterId, limited: false, stopped: "" };
+
+  const store = await shopName(admin, shop);
+  let applied = 0;
+  let failed = 0;
+  let lastId = args.afterId;
+  let stopped = "";
+  const touched = new Set<string>();
+
+  for (const [i, img] of images.entries()) {
+    if (i > 0 && Date.now() - started > budget) break;
+    if (i > 0) await new Promise((r) => setTimeout(r, pace));
+    let alt = "";
+    for (let attempt = 0; attempt < 2 && !alt; attempt += 1) {
+      try {
+        alt = await generateAlt({ imageUrl: img.url, productTitle: img.productTitle, store });
+      } catch (error) {
+        if (error instanceof AiError && error.code === "quota" && attempt === 0) {
+          await new Promise((r) => setTimeout(r, 6_000));
+          continue;
+        }
+        if (error instanceof AiError && (error.code === "quota" || /isn't set up|key isn't valid|refused|No AI model/.test(error.message))) {
+          stopped = error.message;
+        } else {
+          console.warn(`Easy SEO AI alt: skipped ${img.mediaId}:`, (error as Error)?.message || error);
+        }
+        break;
+      }
+    }
+    if (stopped) break;
+    lastId = img.id;
+    if (!alt) {
+      failed += 1;
+      continue;
+    }
+    await writeAlt(admin, [{ mediaId: img.mediaId, alt }]);
+    await prisma.auditImage.update({ where: { id: img.id }, data: { alt } });
+    touched.add(img.productId);
+    applied += 1;
+  }
+  for (const productId of touched) {
+    const missing = await prisma.auditImage.count({ where: { shop, productId, alt: "" } });
+    await refreshItem(shop, productId, { missingAlt: missing });
+  }
+  const more = stopped ? 0 : await prisma.auditImage.count({ where: { shop, alt: "", id: { gt: lastId } } });
   return { done: more === 0, applied, failed, lastId, limited: false, stopped };
 }

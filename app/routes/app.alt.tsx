@@ -22,7 +22,8 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getActivePlan } from "../models/billing.server";
 import { addUsage, remaining } from "../models/usage.server";
-import { applyAltBatch, writeAlt } from "../models/meta.server";
+import { applyAiAltBatch, applyAltBatch, shopName, writeAlt } from "../models/meta.server";
+import { AiError, aiConfigured, generateAlt } from "../models/ai.server";
 import { refreshItem } from "../models/scan.server";
 import { AdminError } from "../models/admin.server";
 import { formatLimit, limit } from "../lib/plans";
@@ -37,12 +38,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
   const where: any = { shop, ...(show === "missing" ? { alt: "" } : {}) };
   const plan = await getActivePlan(admin);
-  const [images, total, missing, all, left] = await Promise.all([
+  const [images, total, missing, all, left, aiLeft] = await Promise.all([
     prisma.auditImage.findMany({ where, orderBy: [{ productTitle: "asc" }, { position: "asc" }], skip: page * PAGE_SIZE, take: PAGE_SIZE }),
     prisma.auditImage.count({ where }),
     prisma.auditImage.count({ where: { shop, alt: "" } }),
     prisma.auditImage.count({ where: { shop } }),
     remaining(shop, plan, "altEdits"),
+    remaining(shop, plan, "aiGenerations"),
   ]);
   return {
     show,
@@ -53,6 +55,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     images: images.map((i) => ({ id: i.id, mediaId: i.mediaId, productId: i.productId, productTitle: i.productTitle, url: i.url, alt: i.alt, position: i.position })),
     left: Number.isFinite(left) ? left : -1,
     monthlyCap: limit(plan, "altEdits"),
+    ai: { enabled: aiConfigured(), left: Number.isFinite(aiLeft) ? aiLeft : -1, cap: limit(plan, "aiGenerations") },
   };
 };
 
@@ -72,6 +75,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       await refreshItem(shop, img.productId, { missingAlt: await prisma.auditImage.count({ where: { shop, productId: img.productId, alt: "" } }) });
       return { ok: true, saved: true };
     }
+    if (intent === "ai") {
+      const mediaId = String(form.get("mediaId"));
+      const img = await prisma.auditImage.findUnique({ where: { shop_mediaId: { shop, mediaId } } });
+      if (!img) return { ok: false, error: "Image not found — run the audit again." };
+      const plan = await getActivePlan(admin);
+      if ((await remaining(shop, plan, "aiGenerations")) <= 0) {
+        return { ok: false, error: "You've used this month's AI writes. Upgrade for more, or write it by hand." };
+      }
+      const alt = await generateAlt({ imageUrl: img.url, productTitle: img.productTitle, store: await shopName(admin, shop) });
+      await addUsage(shop, "aiGenerations", 1);
+      return { ok: true, ai: { mediaId, alt } };
+    }
+    if (intent === "aibulk") {
+      if (!aiConfigured()) return { ok: false, error: "AI writing isn't set up yet." };
+      const plan = await getActivePlan(admin);
+      const allowance = await remaining(shop, plan, "aiGenerations");
+      const result = await applyAiAltBatch({
+        admin,
+        shop,
+        afterId: String(form.get("afterId") || ""),
+        allowance: Number.isFinite(allowance) ? allowance : 10_000,
+      });
+      await addUsage(shop, "aiGenerations", result.applied);
+      return { ok: true, aibulk: result };
+    }
     if (intent === "bulk") {
       const plan = await getActivePlan(admin);
       const allowance = await remaining(shop, plan, "altEdits");
@@ -86,15 +114,35 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return { ok: true, bulk: result };
     }
   } catch (error) {
+    if (error instanceof AiError) return { ok: false, error: error.message };
     console.error("Easy SEO alt:", error);
     return { ok: false, error: error instanceof AdminError ? `Shopify said: ${error.message}` : "Saving failed. Try again." };
   }
   return { ok: false, error: "Unknown action." };
 };
 
-function AltRow({ image, onSave, saving }: { image: any; onSave: (alt: string) => void; saving: boolean }) {
+function AltRow({
+  image,
+  onSave,
+  saving,
+  onAi,
+  aiBusy,
+  aiDisabled,
+  aiDraft,
+}: {
+  image: any;
+  onSave: (alt: string) => void;
+  saving: boolean;
+  onAi: () => void;
+  aiBusy: boolean;
+  aiDisabled: boolean;
+  aiDraft?: string;
+}) {
   const [value, setValue] = useState(image.alt);
   useEffect(() => setValue(image.alt), [image.alt]);
+  useEffect(() => {
+    if (aiDraft) setValue(aiDraft);
+  }, [aiDraft]);
   return (
     <InlineStack gap="300" blockAlign="center" wrap={false}>
       <Thumbnail source={image.url + (image.url.includes("?") ? "&" : "?") + "width=120"} alt={image.alt} size="medium" />
@@ -104,7 +152,8 @@ function AltRow({ image, onSave, saving }: { image: any; onSave: (alt: string) =
           <TextField label="Alt text" labelHidden autoComplete="off" value={value} onChange={setValue} placeholder="Describe the image" maxLength={512} />
         </BlockStack>
       </div>
-      <Button onClick={() => onSave(value)} loading={saving} disabled={value === image.alt}>Save</Button>
+      <Button onClick={onAi} loading={aiBusy} disabled={aiDisabled}>✨ AI</Button>
+      <Button variant={value !== image.alt ? "primary" : undefined} onClick={() => onSave(value)} loading={saving} disabled={value === image.alt}>Save</Button>
     </InlineStack>
   );
 }
@@ -118,6 +167,55 @@ export default function AltPage() {
   const bulk = useFetcher<typeof action>();
   const [savingId, setSavingId] = useState<string | null>(null);
   const [run, setRun] = useState<{ scope: "missing" | "all"; applied: number } | null>(null);
+  const writer = useFetcher<typeof action>();
+  const aiBulk = useFetcher<typeof action>();
+  const [aiDrafts, setAiDrafts] = useState<Record<string, string>>({});
+  const [aiRun, setAiRun] = useState<{ applied: number; failed: number; total: number } | null>(null);
+  const aiBusyId = writer.state !== "idle" ? String(writer.formData?.get("mediaId") ?? "") : "";
+  const aiOff = !data.ai.enabled || data.ai.left === 0;
+
+  // One image: the AI text goes into that row's field; Save writes it.
+  useEffect(() => {
+    const d = writer.data as any;
+    if (writer.state !== "idle" || !d) return;
+    if (d.error) shopify.toast.show(d.error, { isError: true });
+    else if (d.ai) {
+      setAiDrafts((cur) => ({ ...cur, [d.ai.mediaId]: d.ai.alt }));
+      shopify.toast.show("AI alt text added — review it, then Save");
+      revalidator.revalidate();
+    }
+  }, [writer.state, writer.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // All missing: batch after batch, saved straight to Shopify.
+  useEffect(() => {
+    const d = aiBulk.data as any;
+    if (!aiRun || aiBulk.state !== "idle" || !d) return;
+    if (d.error) {
+      shopify.toast.show(d.error, { isError: true });
+      setAiRun(null);
+      revalidator.revalidate();
+      return;
+    }
+    const r = d.aibulk;
+    const applied = aiRun.applied + (r?.applied ?? 0);
+    const failed = aiRun.failed + (r?.failed ?? 0);
+    if (r?.done) {
+      const skipped = failed ? `, ${failed} skipped` : "";
+      if (r.stopped) shopify.toast.show(`AI wrote alt text for ${applied}${skipped}. ${r.stopped}`, { isError: true });
+      else shopify.toast.show(r.limited ? `AI wrote ${applied}${skipped} — monthly AI limit reached` : `AI wrote alt text for ${applied} images${skipped}`);
+      setAiRun(null);
+      revalidator.revalidate();
+      return;
+    }
+    setAiRun({ ...aiRun, applied, failed });
+    aiBulk.submit({ intent: "aibulk", afterId: r.lastId }, { method: "POST" });
+  }, [aiBulk.state, aiBulk.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const aiCount = data.ai.left < 0 ? data.missing : Math.min(data.missing, data.ai.left);
+  const startAi = () => {
+    setAiRun({ applied: 0, failed: 0, total: aiCount });
+    aiBulk.submit({ intent: "aibulk", afterId: "" }, { method: "POST" });
+  };
 
   useEffect(() => {
     const d = saver.data as any;
@@ -177,6 +275,12 @@ export default function AltPage() {
                   {data.left < 0 ? "Unlimited" : `${data.left} of ${formatLimit(data.monthlyCap)} left this month`}
                 </Text>
               </InlineStack>
+              {aiRun && (
+                <BlockStack gap="100">
+                  <Text as="p">✨ AI is looking at your images… {aiRun.applied} of {aiRun.total} done{aiRun.failed ? ` (${aiRun.failed} skipped)` : ""}. Keep this page open.</Text>
+                  <ProgressBar tone="success" progress={Math.min(97, ((aiRun.applied + aiRun.failed) / Math.max(1, aiRun.total)) * 100)} />
+                </BlockStack>
+              )}
               {run && (
                 <BlockStack gap="100">
                   <Text as="p">Writing alt text… {run.applied} done</Text>
@@ -184,11 +288,19 @@ export default function AltPage() {
                 </BlockStack>
               )}
               <InlineStack gap="200">
-                <Button variant="primary" disabled={!!run || data.missing === 0 || data.left === 0} onClick={() => start("missing")}>
-                  {`Fill missing alt text (${data.missing})`}
+                <Button variant="primary" tone="success" disabled={!!run || !!aiRun || aiOff || data.missing === 0} loading={!!aiRun} onClick={startAi}>
+                  {`✨ Write all with AI (${aiCount})`}
                 </Button>
-                <Button disabled={!!run || data.all === 0 || data.left === 0} onClick={() => start("all")}>Rewrite all from template</Button>
+                <Button disabled={!!run || !!aiRun || data.missing === 0 || data.left === 0} onClick={() => start("missing")}>
+                  {`Fill missing from template (${data.missing})`}
+                </Button>
+                <Button disabled={!!run || !!aiRun || data.all === 0 || data.left === 0} onClick={() => start("all")}>Rewrite all from template</Button>
               </InlineStack>
+              <Text as="p" variant="bodySm" tone="subdued">
+                {!data.ai.enabled
+                  ? "AI writing isn't set up on this app yet."
+                  : `AI looks at each image and describes what's in it. ${data.ai.left < 0 ? "" : `${data.ai.left} of ${formatLimit(data.ai.cap)} AI writes left this month.`}`}
+              </Text>
             </BlockStack>
           </Card>
         </Layout.Section>
@@ -212,6 +324,10 @@ export default function AltPage() {
                     key={img.id}
                     image={img}
                     saving={savingId === img.mediaId && saver.state !== "idle"}
+                    aiDraft={aiDrafts[img.mediaId]}
+                    aiBusy={aiBusyId === img.mediaId}
+                    aiDisabled={aiOff || writer.state !== "idle" || !!aiRun}
+                    onAi={() => writer.submit({ intent: "ai", mediaId: img.mediaId }, { method: "POST" })}
                     onSave={(alt) => {
                       setSavingId(img.mediaId);
                       saver.submit({ intent: "save", mediaId: img.mediaId, alt }, { method: "POST" });

@@ -138,26 +138,13 @@ async function callGemini(model: string, key: string, body: unknown): Promise<Re
   }
 }
 
-/** Writes a title and description for `src`. Throws AiError with a merchant-readable message. */
-export async function generateMeta(src: SourceContent, store: string): Promise<{ title: string; description: string }> {
+/**
+ * Sends one request to the first available model and returns the parsed JSON
+ * answer. Throws AiError with a merchant-readable message.
+ */
+async function askGemini(body: Record<string, unknown>): Promise<any> {
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) throw new AiError("AI writing isn't set up yet.");
-
-  const body = {
-    systemInstruction: { parts: [{ text: SYSTEM }] },
-    contents: [{ role: "user", parts: [{ text: prompt(src, store) }] }],
-    generationConfig: {
-      temperature: 0.6,
-      maxOutputTokens: 400,
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "OBJECT",
-        properties: { title: { type: "STRING" }, description: { type: "STRING" } },
-        required: ["title", "description"],
-      },
-    },
-  };
-
   for (const model of models()) {
     const res = await callGemini(model, key, body);
     if (res.status === 404) continue; // model retired or not on this tier — try the next one
@@ -172,17 +159,98 @@ export async function generateMeta(src: SourceContent, store: string): Promise<{
     workingModel = model;
     const json: any = await res.json();
     const text = (json?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p?.text ?? "").join("");
-    let out: any;
     try {
-      out = JSON.parse(text);
+      return JSON.parse(text);
     } catch {
       throw new AiError("The AI answer was unreadable. Try again.");
     }
-    const clean = (s: unknown) => String(s ?? "").replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s+/g, " ");
-    const title = truncate(clean(out?.title), TITLE_MAX);
-    const description = truncate(clean(out?.description), DESCRIPTION_MAX);
-    if (!title && !description) throw new AiError("The AI didn't return any text. Try again.");
-    return { title, description };
   }
   throw new AiError("No AI model is available for this key. Set GEMINI_MODEL to a current Gemini model.");
+}
+
+const clean = (s: unknown) => String(s ?? "").replace(/^["'\s]+|["'\s]+$/g, "").replace(/\s+/g, " ");
+
+/** Writes a title and description for `src`. Throws AiError with a merchant-readable message. */
+export async function generateMeta(src: SourceContent, store: string): Promise<{ title: string; description: string }> {
+  const out = await askGemini({
+    systemInstruction: { parts: [{ text: SYSTEM }] },
+    contents: [{ role: "user", parts: [{ text: prompt(src, store) }] }],
+    generationConfig: {
+      temperature: 0.6,
+      maxOutputTokens: 400,
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: { title: { type: "STRING" }, description: { type: "STRING" } },
+        required: ["title", "description"],
+      },
+    },
+  });
+  const title = truncate(clean(out?.title), TITLE_MAX);
+  const description = truncate(clean(out?.description), DESCRIPTION_MAX);
+  if (!title && !description) throw new AiError("The AI didn't return any text. Try again.");
+  return { title, description };
+}
+
+export const ALT_MAX = 125;
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+const ALT_SYSTEM = [
+  "You write alt text for product images in a Shopify store, for search engines and screen-reader users.",
+  `Return JSON with "alt": one plain sentence fragment, at most ${ALT_MAX} characters.`,
+  "Describe what is actually visible: the item, its colour, material or setting, and any visible text that matters.",
+  'Do not start with "image of" or "picture of". No emoji, no hashtags, no keyword lists, no prices or claims.',
+  "If the image shows the named product, use the product name naturally. Write in the same language as the product name.",
+].join(" ");
+
+/** Shopify CDN URLs resize on request; 768px is plenty to describe a photo. */
+function sizedUrl(url: string): string {
+  if (!/cdn\.shopify\.com|shopifycdn|myshopify\.com/.test(url)) return url;
+  return url + (url.includes("?") ? "&" : "?") + "width=768";
+}
+
+async function fetchImage(url: string): Promise<{ mimeType: string; data: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(sizedUrl(url), { signal: controller.signal });
+    if (!res.ok) throw new AiError("Couldn't load that image.");
+    const mimeType = (res.headers.get("content-type") || "").split(";")[0].trim();
+    if (!/^image\/(jpeg|png|webp|heic|heif|gif)$/.test(mimeType)) throw new AiError("That image format can't be described by the AI.");
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_IMAGE_BYTES) throw new AiError("That image is too large for the AI to read.");
+    return { mimeType: mimeType === "image/gif" ? "image/png" : mimeType, data: buf.toString("base64") };
+  } catch (error: any) {
+    if (error instanceof AiError) throw error;
+    throw new AiError(error?.name === "AbortError" ? "Loading the image took too long." : "Couldn't load that image.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Looks at the image itself and writes alt text for it. */
+export async function generateAlt(args: { imageUrl: string; productTitle: string; store: string }): Promise<string> {
+  if (!aiConfigured()) throw new AiError("AI writing isn't set up yet.");
+  const image = await fetchImage(args.imageUrl);
+  const out = await askGemini({
+    systemInstruction: { parts: [{ text: ALT_SYSTEM }] },
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { inlineData: image },
+          { text: `Store: ${args.store}\nProduct: ${args.productTitle}` },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.4,
+      maxOutputTokens: 200,
+      responseMimeType: "application/json",
+      responseSchema: { type: "OBJECT", properties: { alt: { type: "STRING" } }, required: ["alt"] },
+    },
+  });
+  const alt = truncate(clean(out?.alt).replace(/^(an? )?(image|picture|photo) of /i, ""), ALT_MAX);
+  if (!alt) throw new AiError("The AI didn't return any text. Try again.");
+  return alt.charAt(0).toUpperCase() + alt.slice(1);
 }
