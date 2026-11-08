@@ -108,3 +108,13 @@ npm run dev
 ```bash
 npm test      # লোকাল Postgres লাগে: DATABASE_URL সেট করে চালান
 ```
+
+## AI দিয়ে title/description লেখা (ফ্রি)
+1. https://aistudio.google.com/apikey → Google অ্যাকাউন্টে লগইন → **Create API key** (billing লাগে না)।
+2. Vercel → easy-seo-meta → Environment Variables → `GEMINI_API_KEY` = সেই key (Production and Preview)।
+3. Redeploy। Meta tags → Edit-এ "✨ Write with AI" বাটন চালু হয়ে যাবে।
+
+- প্ল্যান অনুযায়ী মাসিক সীমা: Free ১০, Basic ৩০০, Advanced ১,০০০।
+- Gemini-র ফ্রি সীমা পুরো অ্যাপের জন্য একসাথে (সব দোকান মিলিয়ে)। অনেক দোকান হলে Google AI Studio-তে billing চালু করলে সীমা বাড়ে, খরচ খুব কম।
+- AI-কে শুধু প্রোডাক্টের নাম, বিবরণ, ব্র্যান্ড, দাম পাঠানো হয় — কোনো গ্রাহকের তথ্য না।
+- ভবিষ্যতে কোনো মডেল বন্ধ হলে অ্যাপ নিজে পরের মডেলে যায়; চাইলে `GEMINI_MODEL` দিয়ে নির্দিষ্ট মডেল বেছে দেওয়া যায়।

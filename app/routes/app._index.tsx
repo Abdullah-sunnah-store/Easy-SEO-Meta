@@ -81,6 +81,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       metaEdits: limit(plan, "metaEdits"),
       altEdits: limit(plan, "altEdits"),
       compressions: limit(plan, "compressions"),
+      aiGenerations: limit(plan, "aiGenerations"),
       auditItems: limit(plan, "auditItems"),
     },
     allResources: can(plan, "allResources"),
@@ -227,11 +228,12 @@ export default function Dashboard() {
                 <Text as="h2" variant="headingMd">This month</Text>
                 <Badge>{`${data.plan} plan`}</Badge>
               </InlineStack>
-              <InlineGrid columns={{ xs: 1, sm: 3 }} gap="400">
+              <InlineGrid columns={{ xs: 1, sm: 2, md: 4 }} gap="400">
                 {[
                   { label: "Template meta edits", used: data.usage.metaEdits, cap: data.limits.metaEdits },
                   { label: "Alt texts written", used: data.usage.altEdits, cap: data.limits.altEdits },
                   { label: "Images compressed", used: data.usage.compressions, cap: data.limits.compressions },
+                  { label: "AI-written meta", used: data.usage.aiGenerations, cap: data.limits.aiGenerations },
                 ].map((m) => (
                   <Box key={m.label}>
                     <Text as="p" tone="subdued">{m.label}</Text>

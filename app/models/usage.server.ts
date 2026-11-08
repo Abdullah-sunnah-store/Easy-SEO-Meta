@@ -1,7 +1,7 @@
 import prisma from "../db.server";
 import { limit, type PlanName } from "../lib/plans";
 
-export type Meter = "metaEdits" | "altEdits" | "compressions";
+export type Meter = "metaEdits" | "altEdits" | "compressions" | "aiGenerations";
 
 export function currentPeriod(now = new Date()) {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -10,7 +10,12 @@ export function currentPeriod(now = new Date()) {
 export async function getUsage(shop: string) {
   const period = currentPeriod();
   const row = await prisma.usage.findUnique({ where: { shop_period: { shop, period } } });
-  return { metaEdits: row?.metaEdits ?? 0, altEdits: row?.altEdits ?? 0, compressions: row?.compressions ?? 0 };
+  return {
+    metaEdits: row?.metaEdits ?? 0,
+    altEdits: row?.altEdits ?? 0,
+    compressions: row?.compressions ?? 0,
+    aiGenerations: row?.aiGenerations ?? 0,
+  };
 }
 
 /** How many more uses of `meter` the plan allows this month (Infinity = unlimited). */

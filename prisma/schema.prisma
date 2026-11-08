@@ -195,6 +195,7 @@ model Usage {
   metaEdits    Int    @default(0)
   altEdits     Int    @default(0)
   compressions Int    @default(0)
+  aiGenerations Int   @default(0)
 
   @@id([shop, period])
 }

@@ -30,11 +30,11 @@ export function billingPlan(key: string) {
 /** -1 = unlimited. Monthly counters reset on the 1st (UTC). */
 export const PLAN_LIMITS: Record<
   PlanName,
-  { auditItems: number; metaEdits: number; altEdits: number; compressions: number }
+  { auditItems: number; metaEdits: number; altEdits: number; compressions: number; aiGenerations: number }
 > = {
-  Free: { auditItems: 100, metaEdits: 50, altEdits: 50, compressions: 25 },
-  Basic: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 1000 },
-  Advanced: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 5000 },
+  Free: { auditItems: 100, metaEdits: 50, altEdits: 50, compressions: 25, aiGenerations: 10 },
+  Basic: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 1000, aiGenerations: 300 },
+  Advanced: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 5000, aiGenerations: 1000 },
 };
 
 export type Feature =
@@ -57,6 +57,7 @@ export const PLAN_FEATURES: Record<PlanName, string[]> = {
   Free: [
     "SEO audit & score (up to 100 products)",
     "Meta title & description editor",
+    "10 AI-written titles & descriptions / month",
     "50 template meta edits / month",
     "50 image alt texts / month",
     "25 image compressions / month",
@@ -67,6 +68,7 @@ export const PLAN_FEATURES: Record<PlanName, string[]> = {
     "Everything in Free",
     "Audit products, collections, pages & blog posts",
     "Unlimited bulk meta & alt text",
+    "300 AI-written titles & descriptions / month",
     "Auto meta & alt for new products",
     "Auto 301 when a product URL changes",
     "CSV redirect import",
@@ -75,6 +77,7 @@ export const PLAN_FEATURES: Record<PlanName, string[]> = {
   Advanced: [
     "Everything in Basic",
     "Broken internal link finder + one-click fix",
+    "1,000 AI-written titles & descriptions / month",
     "5,000 image compressions / month",
     "Priority support",
   ],

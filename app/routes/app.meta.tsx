@@ -27,6 +27,7 @@ import { getActivePlan } from "../models/billing.server";
 import { addUsage, remaining } from "../models/usage.server";
 import { applyTemplateBatch, renderFor, saveItemSeo, shopName, type BulkScope } from "../models/meta.server";
 import { AdminError } from "../models/admin.server";
+import { AiError, aiConfigured, generateMeta, loadSource, type AiField } from "../models/ai.server";
 import { ISSUES, parseIssues, scoreTone, type IssueCode } from "../lib/audit";
 import { DESCRIPTION_MAX, RESOURCES, RESOURCE_LABEL, TITLE_MAX, type Resource } from "../lib/templates";
 import { can, formatLimit, limit, FEATURE_MIN_PLAN } from "../lib/plans";
@@ -49,12 +50,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (q) where.title = { contains: q, mode: "insensitive" };
 
   const plan = await getActivePlan(admin);
-  const [items, total, settings, left, name] = await Promise.all([
+  const [items, total, settings, left, name, aiLeft] = await Promise.all([
     prisma.auditItem.findMany({ where, orderBy: [{ score: "asc" }, { title: "asc" }], skip: page * PAGE_SIZE, take: PAGE_SIZE }),
     prisma.auditItem.count({ where }),
     prisma.shopSettings.findUnique({ where: { shop } }),
     remaining(shop, plan, "metaEdits"),
     shopName(admin, shop),
+    remaining(shop, plan, "aiGenerations"),
   ]);
   const missingCount = await prisma.auditItem.count({ where: { shop, resource, OR: [{ seoTitle: "" }, { seoDescription: "" }] } });
   const counts = await prisma.auditItem.groupBy({ by: ["resource"], where: { shop }, _count: true });
@@ -82,6 +84,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     monthlyCap: limit(plan, "metaEdits"),
     allResources: can(plan, "allResources"),
     storeName: name,
+    ai: {
+      enabled: aiConfigured(),
+      left: Number.isFinite(aiLeft) ? aiLeft : -1,
+      cap: limit(plan, "aiGenerations"),
+    },
   };
 };
 
@@ -107,6 +114,33 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
       return { ok: true, saved: true };
     }
+    if (intent === "ai") {
+      const resourceId = String(form.get("resourceId"));
+      const field = (["title", "description", "both"].includes(String(form.get("field"))) ? String(form.get("field")) : "both") as AiField;
+      const item = await prisma.auditItem.findUnique({
+        where: { shop_resourceId: { shop, resourceId } },
+        select: { resource: true },
+      });
+      if (!item) return { ok: false, error: "That item isn't in the audit any more — run the audit again." };
+      const plan = await getActivePlan(admin);
+      if (item.resource !== "product" && !can(plan, "allResources")) {
+        return { ok: false, error: `Editing this is on the ${FEATURE_MIN_PLAN.allResources} plan.` };
+      }
+      if ((await remaining(shop, plan, "aiGenerations")) <= 0) {
+        return { ok: false, error: "You've used this month's AI writes. Upgrade for more, or write it by hand." };
+      }
+      const written = await generateMeta(await loadSource(admin, resourceId), await shopName(admin, shop));
+      // Counted only once the AI actually answered — a failed call costs nothing.
+      await addUsage(shop, "aiGenerations", 1);
+      return {
+        ok: true,
+        ai: {
+          field,
+          ...(field !== "description" ? { title: written.title } : {}),
+          ...(field !== "title" ? { description: written.description } : {}),
+        },
+      };
+    }
     if (intent === "bulk") {
       const plan = await getActivePlan(admin);
       const allowance = await remaining(shop, plan, "metaEdits");
@@ -128,6 +162,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
   } catch (error) {
     console.error("Easy SEO meta:", error);
+    if (error instanceof AiError) return { ok: false, error: error.message };
     return { ok: false, error: error instanceof AdminError ? `Shopify said: ${error.message}` : "Saving failed. Try again." };
   }
   return { ok: false, error: "Unknown action." };
@@ -160,6 +195,7 @@ export default function MetaPage() {
   const revalidator = useRevalidator();
   const saver = useFetcher<typeof action>();
   const bulk = useFetcher<typeof action>();
+  const writer = useFetcher<typeof action>();
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState({ title: "", description: "" });
   const [query, setQuery] = useState(data.q);
@@ -184,6 +220,21 @@ export default function MetaPage() {
       setEditing(null);
     } else if (d?.error) shopify.toast.show(d.error, { isError: true });
   }, [saver.data, shopify]);
+
+  // AI writes land in the draft only; nothing reaches Shopify until Save.
+  useEffect(() => {
+    const d = writer.data as any;
+    if (writer.state !== "idle" || !d) return;
+    if (d.error) shopify.toast.show(d.error, { isError: true });
+    else if (d.ai) {
+      setDraft((cur) => ({
+        title: d.ai.title ?? cur.title,
+        description: d.ai.description ?? cur.description,
+      }));
+      shopify.toast.show("AI draft added — review it, then Save");
+      revalidator.revalidate(); // refresh the "AI writes left" count
+    }
+  }, [writer.state, writer.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bulk apply: keep going batch by batch until done or out of allowance.
   useEffect(() => {
@@ -216,6 +267,17 @@ export default function MetaPage() {
   };
 
   const current = data.items.find((i) => i.id === editing);
+  const aiField = writer.state !== "idle" ? String(writer.formData?.get("field") ?? "") : "";
+  const aiDisabled = !data.ai.enabled || data.ai.left === 0 || writer.state !== "idle";
+  const aiHint = !data.ai.enabled
+    ? "AI writing isn't set up on this app yet."
+    : data.ai.left === 0
+      ? "No AI writes left this month."
+      : data.ai.left < 0
+        ? ""
+        : `${data.ai.left} of ${formatLimit(data.ai.cap)} AI writes left this month`;
+  const writeWithAi = (field: AiField) =>
+    current && writer.submit({ intent: "ai", field, resourceId: current.resourceId }, { method: "POST" });
   const tabs = RESOURCES.map((r) => ({ id: r, content: `${RESOURCE_LABEL[r]} (${data.counts[r] ?? 0})` }));
   const locked = data.resource !== "product" && !data.allResources;
   const issueOptions = [
@@ -257,7 +319,14 @@ export default function MetaPage() {
                   onChange={(v) => setDraft((d) => ({ ...d, title: v }))}
                   placeholder={current.title}
                   connectedRight={<Box paddingInline="200" paddingBlockStart="150"><Counter value={draft.title} max={TITLE_MAX} /></Box>}
-                  helpText="Empty = Shopify uses the title."
+                  helpText={
+                    <InlineStack gap="200" blockAlign="center">
+                      <span>Empty = Shopify uses the title.</span>
+                      <Button variant="plain" size="slim" disabled={aiDisabled} loading={aiField === "title"} onClick={() => writeWithAi("title")}>
+                        ✨ Write with AI
+                      </Button>
+                    </InlineStack>
+                  }
                 />
                 <TextField
                   label="Meta description"
@@ -265,12 +334,24 @@ export default function MetaPage() {
                   multiline={3}
                   value={draft.description}
                   onChange={(v) => setDraft((d) => ({ ...d, description: v }))}
-                  helpText={<InlineStack gap="200"><Counter value={draft.description} max={DESCRIPTION_MAX} /><span>Empty = Google picks text from the page.</span></InlineStack>}
+                  helpText={
+                    <InlineStack gap="200" blockAlign="center">
+                      <Counter value={draft.description} max={DESCRIPTION_MAX} />
+                      <span>Empty = Google picks text from the page.</span>
+                      <Button variant="plain" size="slim" disabled={aiDisabled} loading={aiField === "description"} onClick={() => writeWithAi("description")}>
+                        ✨ Write with AI
+                      </Button>
+                    </InlineStack>
+                  }
                 />
-                <InlineStack gap="200">
+                <InlineStack gap="200" blockAlign="center">
+                  <Button variant="primary" tone="success" disabled={aiDisabled} loading={aiField === "both"} onClick={() => writeWithAi("both")}>
+                    ✨ Write both with AI
+                  </Button>
                   <Button onClick={() => setDraft({ title: current.suggestion.title, description: current.suggestion.description })}>
                     Fill from template
                   </Button>
+                  {aiHint && <Text as="span" variant="bodySm" tone="subdued">{aiHint}</Text>}
                 </InlineStack>
                 <SerpPreview title={draft.title || current.title} description={draft.description} path={current.path} store={data.storeName} />
                 <InlineStack gap="200">
