@@ -1,0 +1,234 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  // Vercel's Node runtime is Amazon Linux (OpenSSL 3). `prisma generate` runs
+  // on the build machine so it resolves "native" to that anyway, but naming
+  // the target explicitly stops a cached node_modules from shipping an engine
+  // built for some other platform, which fails at runtime as a 500.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "postgresql"
+  // Postgres in EVERY environment, local development included.
+  //
+  // A Vercel function has no writable disk that survives the request, so a
+  // SQLite file would take every merchant session with it. Postgres also has
+  // to be the provider here rather than only on a deploy branch: Prisma
+  // migrations are provider-specific SQL, so a second provider means a second
+  // migration history, and the two drift. That drift is what left the deployed
+  // branch four commits behind with a retired API version.
+  //
+  // One schema, one migration history, one deployable branch. Point
+  // DATABASE_URL at a separate Neon branch for local dev so development never
+  // writes to live merchant data. Use the POOLED host, keep ?sslmode=require.
+  url      = env("DATABASE_URL")
+  // Migrations must not run through the connection pooler: `prisma migrate
+  // deploy` takes a session-level advisory lock, and PgBouncer hands each
+  // statement a different backend, so the lock is taken on one connection and
+  // looked for on another. Neon publishes the direct host as
+  // DATABASE_URL_UNPOOLED, which the Vercel integration sets alongside the
+  // pooled one. Runtime still uses the pooled URL above.
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+// ---------------------------------------------------------------------------
+// Easy SEO & Meta
+// ---------------------------------------------------------------------------
+
+// Per-shop settings.
+model ShopSettings {
+  shop String @id
+
+  // Meta templates per resource as JSON:
+  // { product: { title, description }, collection: {...}, page: {...},
+  //   article: {...}, alt: "{{product_title}}" }
+  templates String @default("{}")
+
+  // Fill in SEO title/description (and image alt) on products created after
+  // this is switched on, from the templates above (Basic plan).
+  autoMetaNewProducts Boolean @default(false)
+
+  // 301s the app creates on its own.
+  autoRedirectDeleted      Boolean @default(true)
+  autoRedirectHandleChange Boolean @default(true)
+  // Where a deleted product's URL goes.
+  deletedRedirectTarget    String  @default("/collections/all")
+
+  // llms.txt: served through the app proxy at /apps/easy-seo/llms.txt, with a
+  // URL redirect from /llms.txt (llmsRedirectId) so AI crawlers find it.
+  llmsEnabled     Boolean   @default(false)
+  llmsRedirectId  String    @default("")
+  llmsIntro       String    @default("")
+  llmsText        String    @default("")
+  llmsGeneratedAt DateTime?
+
+  // Image compression: longest edge in px and JPEG/WebP quality.
+  compressMaxEdge Int @default(2048)
+  compressQuality Int @default(80)
+
+  updatedAt DateTime @updatedAt
+}
+
+// The current (or last) audit scan of a shop. A scan walks products,
+// collections, pages and articles page by page; the browser keeps calling the
+// next step until it is done, so no request runs longer than Vercel allows.
+model AuditRun {
+  shop       String    @id
+  // idle | running | done | failed
+  status     String    @default("idle")
+  // product | collection | page | article | finalize
+  phase      String    @default("product")
+  cursor     String    @default("")
+  scanned    Int       @default(0)
+  // Item cap for this run (Free plan audits a sample).
+  cap        Int       @default(0)
+  startedAt  DateTime?
+  finishedAt DateTime?
+  error      String    @default("")
+}
+
+// One resource's SEO state, as of the last scan or edit.
+model AuditItem {
+  id         String   @id @default(cuid())
+  shop       String
+  // product | collection | page | article
+  resource   String
+  resourceId String
+  title      String   @default("")
+  handle     String   @default("")
+  // Storefront path, e.g. /products/blue-shirt
+  path       String   @default("")
+  // The custom SEO fields (global.title_tag / global.description_tag). Empty
+  // means Shopify falls back to the title / an excerpt of the description.
+  seoTitle       String @default("")
+  seoDescription String @default("")
+  imageCount     Int    @default(0)
+  missingAlt     Int    @default(0)
+  // Visible text length of the description/body.
+  bodyLength     Int    @default(0)
+  // Template tokens: vendor, productType, price, excerpt, blog.
+  extra          String @default("{}")
+  // JSON array of issue codes (see lib/audit.ts).
+  issues         String @default("[]")
+  score          Int    @default(100)
+  scannedAt      DateTime @default(now())
+
+  @@unique([shop, resourceId])
+  @@index([shop, resource])
+}
+
+// Product images, for alt text and compression.
+model AuditImage {
+  id           String  @id @default(cuid())
+  shop         String
+  // MediaImage GID — also the File id fileUpdate takes.
+  mediaId      String
+  productId    String
+  productTitle String  @default("")
+  url          String  @default("")
+  alt          String  @default("")
+  position     Int     @default(0)
+  // Original file size in bytes, when Shopify reports it.
+  bytes        Int     @default(0)
+  width        Int     @default(0)
+  height       Int     @default(0)
+
+  @@unique([shop, mediaId])
+  @@index([shop, productId])
+}
+
+// Internal links found in descriptions and bodies during a scan; the finalize
+// step marks the ones that point at nothing.
+model LinkRef {
+  id          String  @id @default(cuid())
+  shop        String
+  sourceId    String
+  sourceTitle String  @default("")
+  sourceType  String  @default("")
+  // Normalised storefront path the link points at.
+  path        String
+  broken      Boolean @default(false)
+
+  @@index([shop, broken])
+}
+
+// productId → handle, so products/delete (whose payload has only the id) and
+// handle changes can be turned into 301s.
+model ProductHandle {
+  shop      String
+  productId String
+  handle    String
+
+  @@id([shop, productId])
+}
+
+// Monthly usage against plan limits.
+model Usage {
+  shop         String
+  period       String // YYYY-MM (UTC)
+  metaEdits    Int    @default(0)
+  altEdits     Int    @default(0)
+  compressions Int    @default(0)
+
+  @@id([shop, period])
+}
+
+// Every image the app compressed, with the backup that restores it.
+model CompressedImage {
+  id            String   @id @default(cuid())
+  shop          String
+  mediaId       String
+  productId     String   @default("")
+  productTitle  String   @default("")
+  // The original, uploaded to Files before the product image was replaced.
+  backupFileId  String   @default("")
+  originalBytes Int      @default(0)
+  newBytes      Int      @default(0)
+  // compressed | skipped | failed | restored
+  status        String
+  message       String   @default("")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, mediaId])
+  @@index([shop, status])
+}
+
+// 301s the app created on its own, for the activity list.
+model RedirectLog {
+  id        String   @id @default(cuid())
+  shop      String
+  path      String
+  target    String
+  // deleted | handle_change | broken_link | csv | manual | llms
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([shop, createdAt])
+}

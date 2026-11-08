@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "remix",
+
+  "installCommand": "npm ci --include=dev",
+
+  "buildCommand": "npm run vercel-build",
+
+  "github": { "silent": true }
+}

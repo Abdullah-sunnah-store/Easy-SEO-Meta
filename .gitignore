@@ -1,0 +1,32 @@
+node_modules
+.DS_Store
+
+/.cache
+/build
+/app/build
+/public/build/
+/public/_dev
+/app/public/build
+
+.env
+.env.*
+!.env.example
+
+# package-lock.json is deliberately NOT ignored: Vercel's install step runs
+# `npm ci`, which refuses to install without a lockfile. Ignoring it breaks the
+# deploy.
+yarn.lock
+pnpm-lock.yaml
+
+/extensions/*/dist
+
+# Ignore shopify files created during app dev
+.shopify/*
+.shopify.lock
+
+# Vercel CLI state and the local copy of the build output manifest.
+.vercel
+
+# Leftover local SQLite file from before Postgres became the only provider.
+*.sqlite
+*.sqlite-journal

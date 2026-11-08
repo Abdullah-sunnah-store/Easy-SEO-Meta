@@ -1,0 +1,76 @@
+# Development configuration - `npm run dev` points this app at a tunnel and
+# scripts/dev.mjs re-releases shopify.app.production.toml when it exits.
+#
+# Every URL here points at the permanent production host:
+#   https://easy-seo-meta.vercel.app
+# Release with `npm run deploy` - it runs scripts/check-release-config.mjs
+# first, which refuses tunnels, wrong origins and webhook paths that 404.
+#
+# client_id is filled in by `shopify app config link` (see docs/SETUP.md).
+
+client_id = "9c4a5b2972339c3f0fc5fa6bf4670637"
+name = "Easy SEO & Meta"
+handle = "easy-seo-meta"
+# The bare origin, no /app: relative webhook uris are concatenated onto this.
+# routes/_index sends ?shop= installs on to /app.
+application_url = "https://easy-seo-meta.vercel.app"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[access_scopes]
+# products: SEO fields, image alt text, image compression.
+# online_store_pages: SEO fields of pages, blogs and articles; broken-link scan.
+# online_store_navigation: URL redirects (manager, CSV import, auto-redirects,
+#   the /llms.txt redirect).
+# files: backups of original photos before compression, and restoring them.
+scopes = "read_products,write_products,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_files,write_files"
+
+[auth]
+redirect_urls = [
+  "https://easy-seo-meta.vercel.app/auth/callback",
+  "https://easy-seo-meta.vercel.app/auth/shopify/callback",
+  "https://easy-seo-meta.vercel.app/api/auth/callback",
+]
+
+[app_proxy]
+# Serves /apps/easy-seo/llms.txt on the shop's domain; /llms.txt redirects here.
+url = "https://easy-seo-meta.vercel.app/proxy"
+subpath = "easy-seo"
+prefix = "apps"
+
+[webhooks]
+api_version = "2026-07"
+
+# Absolute uris: what Shopify calls is exactly what is written here.
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  # Keeps the handle map current: auto-meta for new products, and a 301 when
+  # a product's handle changes or the product is deleted.
+  [[webhooks.subscriptions]]
+  topics = [ "products/create", "products/update", "products/delete" ]
+  uri = "/webhooks/products"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/data_request" ]
+  uri = "/webhooks/customers/data_request"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "customers/redact" ]
+  uri = "/webhooks/customers/redact"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [ "shop/redact" ]
+  uri = "/webhooks/shop/redact"
+
+[pos]
+embedded = false

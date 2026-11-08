@@ -1,0 +1,8 @@
+name = "remix"
+roles = ["frontend", "backend"]
+webhooks_path = "/webhooks/app/uninstalled"
+
+[commands]
+# Client is generated and DB migrated manually; skip regenerating on every
+# dev start to avoid Windows EPERM locks on the Prisma query-engine DLL.
+dev = "npm exec remix vite:dev"
