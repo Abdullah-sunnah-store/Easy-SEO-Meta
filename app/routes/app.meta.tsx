@@ -25,7 +25,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getActivePlan } from "../models/billing.server";
 import { addUsage, remaining } from "../models/usage.server";
-import { applyTemplateBatch, renderFor, saveItemSeo, shopName, type BulkScope } from "../models/meta.server";
+import { applyAiBatch, applyTemplateBatch, renderFor, saveItemSeo, shopName, type BulkScope } from "../models/meta.server";
 import { AdminError } from "../models/admin.server";
 import { AiError, aiConfigured, generateMeta, loadSource, type AiField } from "../models/ai.server";
 import { ISSUES, parseIssues, scoreTone, type IssueCode } from "../lib/audit";
@@ -141,6 +141,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         },
       };
     }
+    if (intent === "aibulk") {
+      const plan = await getActivePlan(admin);
+      const resource = String(form.get("resource")) as Resource;
+      if (resource !== "product" && !can(plan, "allResources")) {
+        return { ok: false, error: `Editing ${RESOURCE_LABEL[resource].toLowerCase()} is on the ${FEATURE_MIN_PLAN.allResources} plan.` };
+      }
+      if (!aiConfigured()) return { ok: false, error: "AI writing isn't set up yet." };
+      const allowance = await remaining(shop, plan, "aiGenerations");
+      const result = await applyAiBatch({
+        admin,
+        shop,
+        resource,
+        scope: String(form.get("scope")) === "selected" ? "selected" : "missing",
+        ids: JSON.parse(String(form.get("ids") || "[]")),
+        afterId: String(form.get("afterId") || ""),
+        allowance: Number.isFinite(allowance) ? allowance : 10_000,
+      });
+      await addUsage(shop, "aiGenerations", result.applied);
+      return { ok: true, aibulk: result };
+    }
     if (intent === "bulk") {
       const plan = await getActivePlan(admin);
       const allowance = await remaining(shop, plan, "metaEdits");
@@ -196,6 +216,8 @@ export default function MetaPage() {
   const saver = useFetcher<typeof action>();
   const bulk = useFetcher<typeof action>();
   const writer = useFetcher<typeof action>();
+  const aiBulk = useFetcher<typeof action>();
+  const [aiRun, setAiRun] = useState<{ scope: "missing" | "selected"; ids: string[]; applied: number; failed: number; total: number } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState({ title: "", description: "" });
   const [query, setQuery] = useState(data.q);
@@ -235,6 +257,43 @@ export default function MetaPage() {
       revalidator.revalidate(); // refresh the "AI writes left" count
     }
   }, [writer.state, writer.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // AI fix-all: one batch per request until done, out of AI writes, or the quota stops it.
+  useEffect(() => {
+    const d = aiBulk.data as any;
+    if (!aiRun || aiBulk.state !== "idle" || !d) return;
+    if (d.error) {
+      shopify.toast.show(d.error, { isError: true });
+      setAiRun(null);
+      revalidator.revalidate();
+      return;
+    }
+    const r = d.aibulk;
+    const applied = aiRun.applied + (r?.applied ?? 0);
+    const failed = aiRun.failed + (r?.failed ?? 0);
+    if (r?.done) {
+      const skipped = failed ? `, ${failed} skipped` : "";
+      if (r.stopped) shopify.toast.show(`AI wrote ${applied}${skipped}. ${r.stopped}`, { isError: true });
+      else shopify.toast.show(r.limited ? `AI wrote ${applied}${skipped} — monthly AI limit reached` : `AI wrote ${applied}${skipped}`);
+      setAiRun(null);
+      clearSelection();
+      revalidator.revalidate();
+      return;
+    }
+    setAiRun({ ...aiRun, applied, failed });
+    aiBulk.submit(
+      { intent: "aibulk", resource: data.resource, scope: aiRun.scope, ids: JSON.stringify(aiRun.ids), afterId: r.lastId },
+      { method: "POST" },
+    );
+  }, [aiBulk.state, aiBulk.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const startAiBulk = (scope: "missing" | "selected") => {
+    const ids = scope === "selected" ? (allResourcesSelected ? data.items.map((i) => i.id) : selectedResources) : [];
+    const want = scope === "missing" ? data.missingCount : ids.length;
+    const total = data.ai.left < 0 ? want : Math.min(want, data.ai.left);
+    setAiRun({ scope, ids, applied: 0, failed: 0, total });
+    aiBulk.submit({ intent: "aibulk", resource: data.resource, scope, ids: JSON.stringify(ids), afterId: "" }, { method: "POST" });
+  };
 
   // Bulk apply: keep going batch by batch until done or out of allowance.
   useEffect(() => {
@@ -384,8 +443,14 @@ export default function MetaPage() {
                   <ProgressBar progress={Math.min(95, (run.applied / Math.max(1, run.scope === "missing" ? data.missingCount : run.scope === "all" ? data.total : run.ids.length)) * 100)} />
                 </BlockStack>
               )}
+              {aiRun && (
+                <BlockStack gap="100">
+                  <Text as="p">✨ AI is writing… {aiRun.applied} of {aiRun.total} done{aiRun.failed ? ` (${aiRun.failed} skipped)` : ""}. Keep this page open.</Text>
+                  <ProgressBar tone="success" progress={Math.min(97, ((aiRun.applied + aiRun.failed) / Math.max(1, aiRun.total)) * 100)} />
+                </BlockStack>
+              )}
               <InlineStack gap="200">
-                <Button variant="primary" disabled={!!run || locked || data.missingCount === 0 || data.left === 0} onClick={() => startBulk("missing")}>
+                <Button variant="primary" disabled={!!run || !!aiRun || locked || data.missingCount === 0 || data.left === 0} onClick={() => startBulk("missing")}>
                   {`Fill missing (${data.missingCount})`}
                 </Button>
                 <Button disabled={!!run || locked || selectedResources.length === 0 || data.left === 0} onClick={() => startBulk("selected")}>
@@ -394,9 +459,26 @@ export default function MetaPage() {
                 <Button disabled={!!run || locked || data.left === 0} onClick={() => startBulk("all")} tone="critical" variant="secondary">
                   Overwrite all
                 </Button>
+                <Button
+                  variant="primary"
+                  tone="success"
+                  disabled={!!run || !!aiRun || locked || !data.ai.enabled || data.ai.left === 0 || data.missingCount === 0}
+                  loading={!!aiRun && aiRun.scope === "missing"}
+                  onClick={() => startAiBulk("missing")}
+                >
+                  {`✨ Fix all with AI (${data.ai.left < 0 ? data.missingCount : Math.min(data.missingCount, data.ai.left)})`}
+                </Button>
+                <Button
+                  disabled={!!run || !!aiRun || locked || !data.ai.enabled || data.ai.left === 0 || selectedResources.length === 0}
+                  loading={!!aiRun && aiRun.scope === "selected"}
+                  onClick={() => startAiBulk("selected")}
+                >
+                  {`✨ AI rewrite selected (${allResourcesSelected ? data.items.length : selectedResources.length})`}
+                </Button>
               </InlineStack>
               <Text as="p" variant="bodySm" tone="subdued">
-                "Fill missing" only writes empty fields and keeps what you wrote by hand.
+                "Fill missing" and "Fix all with AI" only write empty fields and keep what you wrote by hand. "AI rewrite selected" replaces both fields.
+                {data.ai.enabled && data.ai.left >= 0 ? ` ${data.ai.left} of ${formatLimit(data.ai.cap)} AI writes left this month.` : ""}
               </Text>
             </BlockStack>
           </Card>

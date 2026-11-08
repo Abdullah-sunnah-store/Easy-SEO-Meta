@@ -18,7 +18,11 @@
 import { gql, type AdminClient } from "./admin.server";
 import { DESCRIPTION_MAX, TITLE_MAX, htmlToText, truncate } from "../lib/templates";
 
-export class AiError extends Error {}
+export class AiError extends Error {
+  constructor(message: string, readonly code: "quota" | "other" = "other") {
+    super(message);
+  }
+}
 
 export type AiField = "title" | "description" | "both";
 
@@ -157,7 +161,7 @@ export async function generateMeta(src: SourceContent, store: string): Promise<{
   for (const model of models()) {
     const res = await callGemini(model, key, body);
     if (res.status === 404) continue; // model retired or not on this tier — try the next one
-    if (res.status === 429) throw new AiError("The free AI quota is used up for the moment. Try again in a minute.");
+    if (res.status === 429) throw new AiError("The free AI quota is used up for the moment. Try again in a minute.", "quota");
     if (res.status === 400 || res.status === 401 || res.status === 403) {
       const detail = await res.text().catch(() => "");
       console.error(`Easy SEO AI: Gemini ${res.status} on ${model}:`, detail.slice(0, 300));
