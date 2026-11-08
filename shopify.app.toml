@@ -26,7 +26,7 @@ include_config_on_deploy = true
 # online_store_navigation: URL redirects (manager, CSV import, auto-redirects,
 #   the /llms.txt redirect).
 # files: backups of original photos before compression, and restoring them.
-scopes = "read_products,write_products,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_files,write_files"
+scopes = "read_products,write_products,read_online_store_pages,write_online_store_pages,read_online_store_navigation,write_online_store_navigation,read_files,write_files,write_app_proxy"
 
 [auth]
 redirect_urls = [
