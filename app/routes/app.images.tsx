@@ -14,6 +14,7 @@ import {
   Banner,
   ProgressBar,
   IndexTable,
+  Thumbnail,
   EmptyState,
 } from "@shopify/polaris";
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
@@ -25,6 +26,9 @@ import { compressBatch, restoreImage } from "../models/images.server";
 import { MIN_BYTES } from "../lib/images";
 import { AdminError } from "../models/admin.server";
 import { formatLimit, limit } from "../lib/plans";
+
+/** Shopify CDN resizes on request — a 120px thumbnail instead of the full file. */
+const thumb = (url: string) => url + (url.includes("?") ? "&" : "?") + "width=120";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -45,12 +49,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.shopSettings.findUnique({ where: { shop } }),
     prisma.auditImage.count({ where: { shop } }),
   ]);
+  // Thumbnails: the product image keeps its media id (and URL) when compressed
+  // or restored, so the scanned URL still shows the current picture.
+  const urls = new Map(
+    (
+      await prisma.auditImage.findMany({
+        where: { shop, mediaId: { in: recent.map((r) => r.mediaId) } },
+        select: { mediaId: true, url: true },
+      })
+    ).map((a) => [a.mediaId, a.url]),
+  );
   return {
     eligible,
     failed,
     eligibleBytes: totals._sum.bytes ?? 0,
     scanned,
-    recent: recent.map((r) => ({ ...r, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() })),
+    recent: recent.map((r) => ({
+      ...r,
+      url: urls.get(r.mediaId) ?? "",
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+    })),
     saved: { count: saved._count, bytes: (saved._sum.originalBytes ?? 0) - (saved._sum.newBytes ?? 0) },
     left: Number.isFinite(left) ? left : -1,
     monthlyCap: limit(plan, "compressions"),
@@ -205,10 +224,19 @@ export default function ImagesPage() {
                 resourceName={{ singular: "image", plural: "images" }}
                 itemCount={data.recent.length}
                 selectable={false}
-                headings={[{ title: "Product" }, { title: "Before" }, { title: "After" }, { title: "Status" }, { title: "" }]}
+                headings={[{ title: "Image" }, { title: "Product" }, { title: "Before" }, { title: "After" }, { title: "Status" }, { title: "" }]}
               >
                 {data.recent.map((r, i) => (
                   <IndexTable.Row id={r.id} key={r.id} position={i}>
+                    <IndexTable.Cell>
+                      {r.url ? (
+                        <a href={r.url} target="_blank" rel="noreferrer" title="Open full size" style={{ display: "inline-block" }}>
+                          <Thumbnail source={thumb(r.url)} alt={r.productTitle || "Product image"} size="small" />
+                        </a>
+                      ) : (
+                        <Text as="span" tone="subdued">—</Text>
+                      )}
+                    </IndexTable.Cell>
                     <IndexTable.Cell>{r.productTitle || "Product image"}</IndexTable.Cell>
                     <IndexTable.Cell>{r.originalBytes ? size(r.originalBytes) : "—"}</IndexTable.Cell>
                     <IndexTable.Cell>
