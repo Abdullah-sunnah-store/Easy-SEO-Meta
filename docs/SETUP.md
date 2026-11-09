@@ -128,3 +128,13 @@ Settings → New products → "Automatically write…" চালু করুন
 - Vercel থেকে `SHOPIFY_DEBUG` মুছে দিন (log-এ token লেখে)।
 - App Store listing-এর privacy policy-তে লিখুন: AI লেখার জন্য প্রোডাক্টের নাম, বিবরণ, ব্র্যান্ড, দাম আর প্রোডাক্ট ছবি Google Gemini-তে পাঠানো হয়; কোনো গ্রাহকের তথ্য না।
 - রিভিউ পাস হলে `SHOPIFY_BILLING_TEST` মুছে দিন, তাহলে আসল চার্জ হবে।
+
+## Speed test (Basic+) — Google PageSpeed key (ফ্রি)
+Key ছাড়া Google রিকোয়েস্ট ফিরিয়ে দেয় (সবার জন্য একটা সাধারণ দৈনিক সীমা, সেটা প্রায় সবসময় শেষ)। তাই একটা ফ্রি key লাগবে:
+1. console.cloud.google.com → উপরে "Default Gemini Project" (বা যেকোনো project) বাছুন।
+2. **APIs & Services → Library** → "PageSpeed Insights API" খুঁজে **Enable**।
+3. **APIs & Services → Credentials → Create credentials → API key** → key কপি (`AIza…`)।
+4. Key-টা Edit → API restrictions → **Restrict key → PageSpeed Insights API** → Save।
+5. Vercel → `PAGESPEED_API_KEY` = সেই key → Redeploy।
+দিনে ২৫,০০০ টেস্ট ফ্রি। প্ল্যানের মাসিক সীমা: Basic ৬০, Advanced ৩০০।
+পাসওয়ার্ড দেওয়া স্টোর (যেমন ডেভ স্টোর) Google খুলতে পারে না — পাসওয়ার্ড সরিয়ে টেস্ট করুন।

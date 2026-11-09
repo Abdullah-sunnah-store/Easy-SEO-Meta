@@ -1,7 +1,7 @@
 import prisma from "../db.server";
 import { limit, type PlanName } from "../lib/plans";
 
-export type Meter = "metaEdits" | "altEdits" | "compressions" | "aiGenerations";
+export type Meter = "metaEdits" | "altEdits" | "compressions" | "aiGenerations" | "speedTests";
 
 export function currentPeriod(now = new Date()) {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -15,6 +15,7 @@ export async function getUsage(shop: string) {
     altEdits: row?.altEdits ?? 0,
     compressions: row?.compressions ?? 0,
     aiGenerations: row?.aiGenerations ?? 0,
+    speedTests: row?.speedTests ?? 0,
   };
 }
 

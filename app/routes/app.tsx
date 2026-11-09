@@ -28,6 +28,7 @@ export default function App() {
         <Link to="/app/alt">Image alt text</Link>
         <Link to="/app/images">Image compression</Link>
         <Link to="/app/redirects">Redirects &amp; links</Link>
+        <Link to="/app/speed">Speed test</Link>
         <Link to="/app/llms">llms.txt</Link>
         <Link to="/app/settings">Settings</Link>
         <Link to="/app/plans">Plans</Link>

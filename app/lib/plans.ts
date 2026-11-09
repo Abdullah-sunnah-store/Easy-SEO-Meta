@@ -30,11 +30,11 @@ export function billingPlan(key: string) {
 /** -1 = unlimited. Monthly counters reset on the 1st (UTC). */
 export const PLAN_LIMITS: Record<
   PlanName,
-  { auditItems: number; metaEdits: number; altEdits: number; compressions: number; aiGenerations: number }
+  { auditItems: number; metaEdits: number; altEdits: number; compressions: number; aiGenerations: number; speedTests: number }
 > = {
-  Free: { auditItems: 100, metaEdits: 50, altEdits: 50, compressions: 25, aiGenerations: 10 },
-  Basic: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 1000, aiGenerations: 300 },
-  Advanced: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 5000, aiGenerations: 1000 },
+  Free: { auditItems: 100, metaEdits: 50, altEdits: 50, compressions: 25, aiGenerations: 10, speedTests: 0 },
+  Basic: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 1000, aiGenerations: 300, speedTests: 60 },
+  Advanced: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 5000, aiGenerations: 1000, speedTests: 300 },
 };
 
 export type Feature =
@@ -42,7 +42,8 @@ export type Feature =
   | "csvRedirects" // bulk-import redirects from CSV
   | "handleRedirects" // 301 when a product handle changes
   | "brokenLinks" // broken internal link report + one-click redirect
-  | "allResources"; // audit collections, pages and articles too
+  | "allResources" // audit collections, pages and articles too
+  | "speedTest"; // Google PageSpeed tests of storefront pages
 
 export const FEATURE_MIN_PLAN: Record<Feature, PlanName> = {
   autoMeta: PLANS.BASIC,
@@ -50,6 +51,7 @@ export const FEATURE_MIN_PLAN: Record<Feature, PlanName> = {
   handleRedirects: PLANS.BASIC,
   allResources: PLANS.BASIC,
   brokenLinks: PLANS.ADVANCED,
+  speedTest: PLANS.BASIC,
 };
 
 // What each plan card lists. Every line must be a feature that works today.
@@ -73,12 +75,14 @@ export const PLAN_FEATURES: Record<PlanName, string[]> = {
     "Auto 301 when a product URL changes",
     "CSV redirect import",
     "1,000 image compressions / month",
+    "Store speed test (Google PageSpeed) — 60 / month",
   ],
   Advanced: [
     "Everything in Basic",
     "Broken internal link finder + one-click fix",
     "1,000 AI-written titles & descriptions / month",
     "5,000 image compressions / month",
+    "Store speed test — 300 / month",
     "Priority support",
   ],
 };

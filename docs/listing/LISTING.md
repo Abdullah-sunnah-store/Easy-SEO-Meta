@@ -40,7 +40,7 @@ Fix SEO titles, meta descriptions and alt text with one click
 
 **App introduction**
 ```
-See what holds your store back in search and fix it: AI meta tags, alt text, images and redirects.
+Find the SEO gaps in your store and fix them fast. AI writes meta tags and alt text in one click.
 ```
 
 **App details**
@@ -70,6 +70,15 @@ Easy SEO & Meta writes better search listings for your store
 4. Image compression — compressed তালিকা (thumbnail, Before/After)
 5. Redirects & links
 ছবিতে দাম, পরিসংখ্যান বা "best/first/only" জাতীয় দাবি রাখবেন না (Shopify-র নিয়ম)।
+
+
+**তৈরি করা screenshots (`docs\listing\screenshots`) আর তাদের alt text (৬৪ অক্ষরের মধ্যে):**
+| ফাইল | Image alt text |
+|---|---|
+| `1-meta-tags.png` | `Bulk SEO title and meta description editor with AI` |
+| `2-alt-text.png` | `AI-written alt text for each product image` |
+| `3-redirects.png` | `Automatic 301 redirects and CSV redirect import` |
+| `4-redirect-list.png` | `List of all URL redirects in the store` |
 
 **Demo store URL** (ঐচ্ছিক) — ফাঁকা রাখতে পারেন।
 

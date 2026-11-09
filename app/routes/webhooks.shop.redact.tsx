@@ -11,6 +11,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   await Promise.all([
     db.session.deleteMany({ where: { shop } }),
     db.shopSettings.deleteMany({ where: { shop } }),
+    db.speedTest.deleteMany({ where: { shop } }),
     db.auditRun.deleteMany({ where: { shop } }),
     db.auditItem.deleteMany({ where: { shop } }),
     db.auditImage.deleteMany({ where: { shop } }),
