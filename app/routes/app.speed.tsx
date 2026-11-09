@@ -25,7 +25,7 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 import { getActivePlan } from "../models/billing.server";
 import { addUsage, remaining } from "../models/usage.server";
-import { SpeedError, parseOpportunities, resolveCustomUrl, runPageSpeed, speedTargets, type Strategy, type Target } from "../models/speed.server";
+import { SpeedError, isPasswordProtected, parseOpportunities, resolveCustomUrl, runPageSpeed, speedTargets, type Strategy, type Target } from "../models/speed.server";
 import { can, formatLimit, limit, FEATURE_MIN_PLAN } from "../lib/plans";
 import { UpgradeNotice } from "../components/UpgradeNotice";
 
@@ -42,8 +42,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     prisma.speedTest.findMany({ where: { shop }, orderBy: { createdAt: "desc" }, take: 60 }),
     speedTargets(admin).catch(() => ({ base: "", targets: [] as Target[] })),
   ]);
+  const passwordProtected = allowed ? await isPasswordProtected(base) : false;
   return {
     allowed,
+    passwordProtected,
     left: Number.isFinite(left) ? left : -1,
     cap: limit(plan, "speedTests"),
     base,
@@ -236,15 +238,19 @@ export default function SpeedPage() {
     const nextFailed = failed + (d.ok ? 0 : 1);
     setDone((n) => n + 1);
     setFailed(nextFailed);
-    if (queue.length) {
+    // Every other page of a password-protected store would fail the same way.
+    const blocked = !d.ok && /password protected/i.test(String(d.error || ""));
+    if (queue.length && !blocked) {
       const [next, ...rest] = queue;
       setQueue(rest);
       submit(next);
       return;
     }
     setTotal(0);
+    setQueue([]);
     revalidator.revalidate();
-    if (nextFailed) shopify.toast.show(nextFailed === 1 && d.error ? d.error : `${nextFailed} test(s) failed — see the results`, { isError: true });
+    if (blocked) shopify.toast.show("Your storefront is password protected — Google can't test it", { isError: true });
+    else if (nextFailed) shopify.toast.show(nextFailed === 1 && d.error ? d.error : `${nextFailed} test(s) failed — see the results`, { isError: true });
     else shopify.toast.show("Speed test finished");
   }, [runner.state, runner.data]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -280,6 +286,14 @@ export default function SpeedPage() {
                 )}
               </InlineStack>
               {!data.allowed && <UpgradeNotice required={FEATURE_MIN_PLAN.speedTest} />}
+              {data.allowed && data.passwordProtected && (
+                <Banner tone="warning" title="Your storefront is password protected">
+                  <p>
+                    Google can't open password-protected pages, so speed tests would fail. Turn off the password in Online Store →
+                    Preferences, run the test, and turn it back on afterwards if you need to.
+                  </p>
+                </Banner>
+              )}
               <InlineGrid columns={{ xs: 1, md: 2 }} gap="400">
                 <BlockStack gap="200">
                   <Text as="span" variant="headingSm">Pages</Text>
@@ -322,10 +336,10 @@ export default function SpeedPage() {
                 </BlockStack>
               )}
               <InlineStack gap="200" blockAlign="center">
-                <Button variant="primary" onClick={start} loading={running} disabled={!data.allowed || running || capped === 0}>
+                <Button variant="primary" onClick={start} loading={running} disabled={!data.allowed || running || capped === 0 || data.passwordProtected}>
                   {`Run speed test (${capped})`}
                 </Button>
-                {jobs.length > capped && <Text as="span" tone="subdued">Only {capped} left this month.</Text>}
+                {data.allowed && jobs.length > capped && <Text as="span" tone="subdued">Only {capped} left this month.</Text>}
                 <Text as="span" variant="bodySm" tone="subdued">Password-protected stores can't be tested.</Text>
               </InlineStack>
             </BlockStack>

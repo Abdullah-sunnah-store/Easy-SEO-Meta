@@ -163,3 +163,24 @@ export function parseOpportunities(raw: string): Opportunity[] {
     return [];
   }
 }
+
+/**
+ * True when the storefront sends visitors to its password page (every
+ * development store, and live stores that are still closed). Google can't test
+ * those pages, so the screen says so before any test is spent. Best effort:
+ * anything unexpected counts as "not protected" and the test itself reports it.
+ */
+export async function isPasswordProtected(base: string): Promise<boolean> {
+  if (!base) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5_000);
+  try {
+    const res = await fetch(base + "/", { redirect: "manual", signal: controller.signal });
+    const location = res.headers.get("location") || "";
+    return res.status >= 300 && res.status < 400 && /\/password(\b|$|\?)/.test(location);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}

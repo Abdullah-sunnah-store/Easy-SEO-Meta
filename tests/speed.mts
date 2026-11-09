@@ -1,5 +1,5 @@
 import assert from "node:assert";
-import { parsePageSpeed, resolveCustomUrl, runPageSpeed, speedTargets, SpeedError } from "../app/models/speed.server";
+import { isPasswordProtected, parsePageSpeed, resolveCustomUrl, runPageSpeed, speedTargets, SpeedError } from "../app/models/speed.server";
 
 // Shape of a real PageSpeed Insights v5 response (Lighthouse 12/13 style).
 const psi = (over: any = {}) => ({
@@ -78,4 +78,14 @@ const admin: any = { graphql: async () => new Response(JSON.stringify({ data: {
 const t = await speedTargets(admin);
 assert.equal(t.base, "https://acme.com");
 assert.deepEqual(t.targets.map((x) => x.url), ["https://acme.com/", "https://acme.com/products/linen-shirt", "https://acme.com/collections/summer"]);
+// password detection on the storefront home page
+(globalThis as any).fetch = async () => new Response(null, { status: 302, headers: { location: "https://acme.com/password" } });
+assert.equal(await isPasswordProtected("https://acme.com"), true);
+(globalThis as any).fetch = async () => new Response("<html>", { status: 200 });
+assert.equal(await isPasswordProtected("https://acme.com"), false);
+(globalThis as any).fetch = async () => new Response(null, { status: 301, headers: { location: "https://www.acme.com/" } });
+assert.equal(await isPasswordProtected("https://acme.com"), false);
+(globalThis as any).fetch = async () => { throw new Error("offline"); };
+assert.equal(await isPasswordProtected("https://acme.com"), false);
+assert.equal(await isPasswordProtected(""), false);
 console.log("ALL SPEED TESTS PASSED");

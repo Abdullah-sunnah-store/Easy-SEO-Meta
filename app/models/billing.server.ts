@@ -34,8 +34,12 @@ export async function getActivePlan(admin: AdminClient): Promise<PlanName> {
       .filter((s: any) => s?.status === "ACTIVE")
       .map((s: any) => s?.name);
 
+    if (body?.errors?.length) console.warn("Easy SEO billing: plan lookup errors:", JSON.stringify(body.errors).slice(0, 300));
     return highestTier(names);
-  } catch {
+  } catch (error) {
+    // Falls back to Free, but say so: a silent fallback looks exactly like a
+    // merchant who never paid.
+    console.warn("Easy SEO billing: plan lookup failed, treating as Free:", (error as Error)?.message || error);
     return FREE_PLAN;
   }
 }
