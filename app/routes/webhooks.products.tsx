@@ -4,13 +4,12 @@ import prisma from "../db.server";
 import { getActivePlanCached } from "../models/billing.server";
 import { can } from "../lib/plans";
 import { createRedirect } from "../models/redirects.server";
-import { renderFor, shopName, writeAlt, writeSeo } from "../models/meta.server";
-import { parseTemplates, renderTemplate, htmlToText } from "../lib/templates";
+import { autoFillNewProduct } from "../models/newProduct.server";
 
 // products/create, products/update, products/delete.
 //
 //  create  → remember the handle; on Basic+, fill empty SEO fields and image
-//            alt text from the merchant's templates (when switched on).
+//            alt text (templates, or AI when switched on) — see newProduct.server.
 //  update  → if the handle changed, 301 the old URL to the new one (Basic+).
 //  delete  → 301 the old URL to the chosen target (all plans). The delete
 //            payload carries only the id, which is why handles are stored.
@@ -53,23 +52,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     if (t.endsWith("create") && settings?.autoMetaNewProducts && can(plan, "autoMeta")) {
-      const name = await shopName(admin, shop);
-      const text = htmlToText(p?.body_html ?? "");
-      const price = p?.variants?.[0]?.price;
-      const item = {
-        title: p?.title ?? "",
-        extra: JSON.stringify({ vendor: p?.vendor ?? "", productType: p?.product_type ?? "", price: price ? String(price) : "", excerpt: text.slice(0, 300) }),
-      };
-      const meta = renderFor("product", settings.templates, item, name);
-      await writeSeo(admin, [{ resourceId: productId, title: meta.title, description: meta.description }]);
-      const altTemplate = parseTemplates(settings.templates).alt;
-      const media: any[] = (p?.media ?? p?.images ?? []).filter((m: any) => m?.admin_graphql_api_id?.includes("MediaImage") && !m?.alt);
-      if (media.length) {
-        await writeAlt(admin, media.map((m, i) => ({
-          mediaId: m.admin_graphql_api_id,
-          alt: renderTemplate(altTemplate, { product_title: item.title, shop: name, vendor: p?.vendor ?? "", n: i > 0 ? i + 1 : "" }, 125),
-        })));
-      }
+      await autoFillNewProduct({ admin, shop, plan, settings, productId, payload: p });
     }
   } catch (error) {
     console.error(`Easy SEO ${topic} for ${shop}:`, error);

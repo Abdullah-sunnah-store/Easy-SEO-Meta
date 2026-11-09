@@ -73,6 +73,8 @@ model ShopSettings {
   // Fill in SEO title/description (and image alt) on products created after
   // this is switched on, from the templates above (Basic plan).
   autoMetaNewProducts Boolean @default(false)
+  // Write new products' SEO title/description with AI (falls back to templates).
+  autoMetaAi          Boolean @default(false)
 
   // 301s the app creates on its own.
   autoRedirectDeleted      Boolean @default(true)

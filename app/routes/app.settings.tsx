@@ -34,6 +34,7 @@ import {
   type Templates,
 } from "../lib/templates";
 import { can, FEATURE_MIN_PLAN } from "../lib/plans";
+import { aiConfigured } from "../models/ai.server";
 import { UpgradeNotice } from "../components/UpgradeNotice";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -43,6 +44,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     templates: parseTemplates(settings.templates),
     autoMetaNewProducts: settings.autoMetaNewProducts,
+    autoMetaAi: settings.autoMetaAi,
+    aiEnabled: aiConfigured(),
     compressMaxEdge: settings.compressMaxEdge,
     compressQuality: settings.compressQuality,
     canAutoMeta: can(plan, "autoMeta"),
@@ -63,6 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   await updateSettings(session.shop, {
     templates: JSON.stringify(templates),
     autoMetaNewProducts: can(plan, "autoMeta") && form.get("autoMetaNewProducts") === "true",
+    autoMetaAi: form.get("autoMetaAi") === "true",
     compressMaxEdge: Math.min(4096, Math.max(800, parseInt(String(form.get("compressMaxEdge") || "2048"), 10) || 2048)),
     compressQuality: Math.min(95, Math.max(50, parseInt(String(form.get("compressQuality") || "80"), 10) || 80)),
   });
@@ -84,6 +88,7 @@ export default function SettingsPage() {
   const [templates, setTemplates] = useState<Templates>(data.templates);
   const [resource, setResource] = useState<Resource>("product");
   const [autoMeta, setAutoMeta] = useState(data.autoMetaNewProducts);
+  const [autoAi, setAutoAi] = useState(data.autoMetaAi);
   const [maxEdge, setMaxEdge] = useState(String(data.compressMaxEdge));
   const [quality, setQuality] = useState(String(data.compressQuality));
 
@@ -102,6 +107,7 @@ export default function SettingsPage() {
       {
         templates: JSON.stringify(templates),
         autoMetaNewProducts: String(autoMeta),
+        autoMetaAi: String(autoAi),
         compressMaxEdge: maxEdge,
         compressQuality: quality,
       },
@@ -171,6 +177,19 @@ export default function SettingsPage() {
                 disabled={!data.canAutoMeta}
                 helpText="Uses the product templates above. Fields you fill in yourself are never overwritten."
               />
+              <Box paddingInlineStart="600">
+                <Checkbox
+                  label="✨ Write the title and description with AI instead"
+                  checked={autoAi && autoMeta && data.canAutoMeta && data.aiEnabled}
+                  onChange={setAutoAi}
+                  disabled={!autoMeta || !data.canAutoMeta || !data.aiEnabled}
+                  helpText={
+                    data.aiEnabled
+                      ? "Uses one AI write per new product. When AI writes run out or the AI is slow, the templates are used instead."
+                      : "AI writing isn't set up on this app yet."
+                  }
+                />
+              </Box>
             </BlockStack>
           </Card>
         </Layout.Section>

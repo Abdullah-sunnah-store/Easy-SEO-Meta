@@ -22,7 +22,7 @@
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "test": "tsx tests/ai.mts && tsx tests/ai-bulk.mts && tsx tests/ai-alt.mts && tsx tests/e2e.mts"
+    "test": "tsx tests/ai.mts && tsx tests/ai-bulk.mts && tsx tests/ai-alt.mts && tsx tests/new-product.mts && tsx tests/e2e.mts"
   },
   "type": "module",
   "engines": {

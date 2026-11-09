@@ -69,7 +69,7 @@ export const PLAN_FEATURES: Record<PlanName, string[]> = {
     "Audit products, collections, pages & blog posts",
     "Unlimited bulk meta & alt text",
     "300 AI-written titles & descriptions / month",
-    "Auto meta & alt for new products",
+    "Auto meta & alt for new products (templates or AI)",
     "Auto 301 when a product URL changes",
     "CSV redirect import",
     "1,000 image compressions / month",
