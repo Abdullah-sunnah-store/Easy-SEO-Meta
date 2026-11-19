@@ -27,6 +27,7 @@ import { getActivePlan } from "../models/billing.server";
 import { addUsage, remaining } from "../models/usage.server";
 import { applyAiBatch, applyTemplateBatch, renderFor, saveItemSeo, shopName, type BulkScope } from "../models/meta.server";
 import { AdminError } from "../models/admin.server";
+import { syncItems } from "../models/scan.server";
 import { AiError, aiConfigured, generateMeta, loadSource, type AiField } from "../models/ai.server";
 import { ISSUES, parseIssues, scoreTone, type IssueCode } from "../lib/audit";
 import { DESCRIPTION_MAX, RESOURCES, RESOURCE_LABEL, TITLE_MAX, type Resource } from "../lib/templates";
@@ -48,6 +49,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const where: any = { shop, resource };
   if (issue && issue in ISSUES) where.issues = { contains: `"${issue}"` };
   if (q) where.title = { contains: q, mode: "insensitive" };
+
+  // Pull the current titles and SEO fields from Shopify for the rows about to be
+  // shown, so a product renamed (or a meta field edited) in the Shopify admin
+  // since the last scan is never displayed with stale data.
+  const onPage = await prisma.auditItem.findMany({
+    where, orderBy: [{ score: "asc" }, { title: "asc" }], skip: page * PAGE_SIZE, take: PAGE_SIZE, select: { resourceId: true },
+  });
+  await syncItems(admin, shop, onPage.map((i) => i.resourceId));
 
   const plan = await getActivePlan(admin);
   const [items, total, settings, left, name, aiLeft] = await Promise.all([

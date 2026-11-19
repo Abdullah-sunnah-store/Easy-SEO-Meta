@@ -349,3 +349,117 @@ export async function refreshItem(shop: string, resourceId: string, patch: { seo
     data: { ...patch, issues: JSON.stringify(issues), score: scoreFor(issues) },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Live sync (App Store requirement 2.1.4 — "Synchronize data accurately").
+//
+// The audit table is a snapshot taken when the scan ran. A merchant who renames
+// a product, edits its description or changes its SEO fields in the Shopify
+// admin afterwards must still see the current values in the app, so every page
+// that lists audit rows re-reads those rows from Shopify first and writes the
+// changes back here. Rows whose resource no longer exists are dropped.
+// ---------------------------------------------------------------------------
+
+const SYNC_QUERY = `#graphql
+  query SeoSyncNodes($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      __typename
+      ... on Product {
+        id title handle vendor productType descriptionHtml
+        seo { title description }
+        priceRangeV2 { minVariantPrice { amount currencyCode } }
+        media(first: 20) { nodes { ... on MediaImage { id alt image { url } } } }
+      }
+      ... on Collection {
+        id title handle descriptionHtml
+        seo { title description }
+        image { altText }
+      }
+      ... on Page {
+        id title handle body
+        titleTag: metafield(namespace: "global", key: "title_tag") { value }
+        descriptionTag: metafield(namespace: "global", key: "description_tag") { value }
+      }
+      ... on Article {
+        id title handle body
+        blog { title handle }
+        image { altText url }
+        titleTag: metafield(namespace: "global", key: "title_tag") { value }
+        descriptionTag: metafield(namespace: "global", key: "description_tag") { value }
+      }
+    }
+  }`;
+
+// Small enough that a batch of products (each with up to 20 media) stays well
+// under the Admin API's single-query cost limit.
+const SYNC_CHUNK = 20;
+
+/**
+ * Re-reads the given audit rows from Shopify and updates any that changed.
+ * Best-effort: a failure is logged and the stored rows are left as they were,
+ * so a Shopify hiccup never breaks the page that called it.
+ */
+export async function syncItems(admin: AdminClient, shop: string, resourceIds: string[]): Promise<void> {
+  const ids = [...new Set(resourceIds.filter(Boolean))];
+  if (!ids.length) return;
+  try {
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += SYNC_CHUNK) chunks.push(ids.slice(i, i + SYNC_CHUNK));
+    const results = await Promise.all(chunks.map((c) => gql(admin, SYNC_QUERY, { ids: c })));
+
+    const fresh = new Map<string, any>();
+    results.forEach((data, ci) => {
+      const nodes: any[] = data?.nodes ?? [];
+      chunks[ci].forEach((id, i) => fresh.set(id, nodes[i] ?? null));
+    });
+
+    const stored = await prisma.auditItem.findMany({ where: { shop, resourceId: { in: ids } } });
+    for (const it of stored) {
+      const node = fresh.get(it.resourceId);
+      if (node === undefined) continue;
+
+      // Deleted in Shopify since the scan.
+      if (node === null) {
+        await prisma.auditItem.deleteMany({ where: { shop, resourceId: it.resourceId } });
+        if (it.resource === "product") await prisma.auditImage.deleteMany({ where: { shop, productId: it.resourceId } });
+        continue;
+      }
+
+      const r = toRow(it.resource as Resource, node);
+      const extra = JSON.stringify(r.extra);
+
+      // Product images: alt text edited in Shopify, and images removed there.
+      if (it.resource === "product") {
+        const liveAlt = new Map((r.images ?? []).map((img) => [img.mediaId, img.alt]));
+        const storedImages = await prisma.auditImage.findMany({ where: { shop, productId: it.resourceId } });
+        for (const img of storedImages) {
+          if (!liveAlt.has(img.mediaId)) {
+            await prisma.auditImage.delete({ where: { id: img.id } });
+          } else if ((liveAlt.get(img.mediaId) ?? "") !== img.alt || img.productTitle !== r.title) {
+            await prisma.auditImage.update({ where: { id: img.id }, data: { alt: liveAlt.get(img.mediaId) ?? "", productTitle: r.title } });
+          }
+        }
+      }
+      const changed =
+        r.title !== it.title || r.handle !== it.handle || r.path !== it.path ||
+        r.seoTitle !== it.seoTitle || r.seoDescription !== it.seoDescription ||
+        r.imageCount !== it.imageCount || r.missingAlt !== it.missingAlt ||
+        r.bodyLength !== it.bodyLength || extra !== it.extra;
+      if (!changed) continue;
+
+      const kept = (JSON.parse(it.issues) as IssueCode[]).filter((c) => c === "broken_links" || c === "dup_title" || c === "dup_desc");
+      const issues = [...new Set([...itemIssues({ resource: it.resource as Resource, ...r }), ...kept])];
+      await prisma.auditItem.update({
+        where: { id: it.id },
+        data: {
+          title: r.title, handle: r.handle, path: r.path,
+          seoTitle: r.seoTitle, seoDescription: r.seoDescription,
+          imageCount: r.imageCount, missingAlt: r.missingAlt, bodyLength: r.bodyLength,
+          extra, issues: JSON.stringify(issues), score: scoreFor(issues), scannedAt: new Date(),
+        },
+      });
+    }
+  } catch (error) {
+    console.error(`Easy SEO sync for ${shop}:`, error);
+  }
+}

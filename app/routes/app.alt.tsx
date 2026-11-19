@@ -24,7 +24,7 @@ import { getActivePlan } from "../models/billing.server";
 import { addUsage, remaining } from "../models/usage.server";
 import { applyAiAltBatch, applyAltBatch, shopName, writeAlt } from "../models/meta.server";
 import { AiError, aiConfigured, generateAlt } from "../models/ai.server";
-import { refreshItem } from "../models/scan.server";
+import { refreshItem, syncItems } from "../models/scan.server";
 import { AdminError } from "../models/admin.server";
 import { formatLimit, limit } from "../lib/plans";
 
@@ -37,6 +37,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const show = url.searchParams.get("show") === "all" ? "all" : "missing";
   const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
   const where: any = { shop, ...(show === "missing" ? { alt: "" } : {}) };
+
+  // Refresh the products behind the images about to be shown (title, alt text,
+  // removed images) from Shopify before reading them.
+  const onPage = await prisma.auditImage.findMany({
+    where, orderBy: [{ productTitle: "asc" }, { position: "asc" }], skip: page * PAGE_SIZE, take: PAGE_SIZE, select: { productId: true },
+  });
+  await syncItems(admin, shop, onPage.map((i) => i.productId));
+
   const plan = await getActivePlan(admin);
   const [images, total, missing, all, left, aiLeft] = await Promise.all([
     prisma.auditImage.findMany({ where, orderBy: [{ productTitle: "asc" }, { position: "asc" }], skip: page * PAGE_SIZE, take: PAGE_SIZE }),

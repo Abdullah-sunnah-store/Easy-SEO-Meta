@@ -5,6 +5,7 @@ import { getActivePlanCached } from "../models/billing.server";
 import { can } from "../lib/plans";
 import { createRedirect } from "../models/redirects.server";
 import { autoFillNewProduct } from "../models/newProduct.server";
+import { syncItems } from "../models/scan.server";
 
 // products/create, products/update, products/delete.
 //
@@ -45,6 +46,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       update: { handle },
     });
     if (!admin) return new Response();
+
+    // Keep the audit row (title, handle, SEO fields, image alt text) in step
+    // with Shopify, so the app never shows a product's old name after a rename.
+    if (t.endsWith("update")) await syncItems(admin, shop, [productId]);
+
     const plan = await getActivePlanCached(shop, admin);
 
     if (t.endsWith("update") && stored && stored.handle !== handle && (settings?.autoRedirectHandleChange ?? true) && can(plan, "handleRedirects")) {

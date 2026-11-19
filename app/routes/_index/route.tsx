@@ -3,6 +3,7 @@ import { redirect } from "@remix-run/node";
 import { Form, useLoaderData } from "@remix-run/react";
 
 import { login } from "../../shopify.server";
+import { embeddedAppUrl, isEmbeddedRequest } from "../../lib/embedded.server";
 
 import styles from "./styles.module.css";
 
@@ -13,7 +14,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(`/app?${url.searchParams.toString()}`);
   }
 
-  return { showForm: Boolean(login) };
+  // Loaded inside the Shopify admin without `shop`: recover it from `host`, and
+  // never offer the shop-domain form in the admin (App Store requirement 4.5.4).
+  const resume = embeddedAppUrl(request);
+  if (resume) throw redirect(resume);
+
+  return { showForm: Boolean(login) && !isEmbeddedRequest(request) };
 };
 
 export default function App() {
