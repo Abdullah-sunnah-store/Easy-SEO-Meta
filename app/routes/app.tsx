@@ -6,11 +6,20 @@ import { NavMenu } from "@shopify/app-bridge-react";
 import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
+import { attributeShop, refCookie } from "../models/affiliate.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
+  const { session } = await authenticate.admin(request);
+
+  // Came through an affiliate link (/r/CODE)? Credit the store once.
+  try {
+    const code = await refCookie.parse(request.headers.get("Cookie"));
+    if (code) await attributeShop(session.shop, String(code), "link");
+  } catch (error) {
+    console.warn("Easy SEO affiliate: link attribution failed:", (error as Error)?.message || error);
+  }
 
   return { apiKey: process.env.SHOPIFY_API_KEY?.trim() || "" };
 };

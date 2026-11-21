@@ -264,3 +264,129 @@ model SpeedTest {
 
   @@index([shop, createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// Affiliate program
+//
+// Affiliates sign up at /affiliates, you approve them at /affiliate-admin, and
+// they submit each store they referred from their dashboard. You check the
+// store (the admin page reads its live plan from Shopify), approve it, and
+// commissions are added per paid billing cycle: 50% of the first, 10% of every
+// one after. Affiliates request a withdrawal; you pay it to bKash / Nagad.
+// ---------------------------------------------------------------------------
+
+model Affiliate {
+  id           String    @id @default(cuid())
+  // Referral code, also in the link /r/CODE.
+  code         String    @unique
+  name         String
+  email        String    @unique
+  phone        String    @default("")
+  passwordHash String
+  // bkash | nagad
+  payoutMethod String    @default("bkash")
+  payoutNumber String    @default("")
+  payoutName   String    @default("")
+  // Main website / page / channel and how they plan to promote.
+  website      String    @default("")
+  promotion    String    @default("")
+  // pending | approved | rejected | suspended
+  status       String    @default("pending")
+  adminNote    String    @default("")
+  clicks       Int       @default(0)
+  createdAt    DateTime  @default(now())
+  approvedAt   DateTime?
+
+  referrals   AffiliateReferral[]
+  commissions AffiliateCommission[]
+  withdrawals AffiliateWithdrawal[]
+}
+
+// A store the affiliate says they referred, with how and where.
+model AffiliateReferral {
+  id          String    @id @default(cuid())
+  affiliateId String
+  affiliate   Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  // The store's myshopify domain when known, else what was entered.
+  shop        String
+  storeUrl    String
+  storeName   String    @default("")
+  // Plan the affiliate says the store is on: Basic | Advanced
+  plan        String    @default("")
+  installedOn DateTime?
+  // facebook | youtube | linkedin | website | whatsapp | personal | other
+  channel     String    @default("other")
+  // Link to the post, video or website the store came from.
+  sourceUrl   String    @default("")
+  howReferred String    @default("")
+  // Link to a screenshot or chat as proof.
+  proof       String    @default("")
+  // pending | approved | rejected | ended
+  status      String    @default("pending")
+  adminNote   String    @default("")
+  // Last live check of the store, JSON (see checkStore()).
+  lastCheck   String    @default("")
+  checkedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  reviewedAt  DateTime?
+
+  commissions AffiliateCommission[]
+
+  @@index([shop])
+  @@index([affiliateId, status])
+}
+
+// One commission line: one paid billing cycle of one referred store, or a
+// manual adjustment (referralId empty).
+model AffiliateCommission {
+  id          String             @id @default(cuid())
+  affiliateId String
+  affiliate   Affiliate          @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  referralId  String?
+  referral    AffiliateReferral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
+  // The billing cycle it pays for (the cycle's end date, YYYY-MM-DD), or
+  // "adj-<timestamp>" for an adjustment.
+  period      String
+  // first | recurring | adjustment
+  kind        String
+  rate        Float              @default(0)
+  baseAmount  Float              @default(0)
+  amount      Float
+  note        String             @default("")
+  createdAt   DateTime           @default(now())
+
+  @@unique([referralId, period])
+  @@index([affiliateId])
+}
+
+model AffiliateWithdrawal {
+  id          String    @id @default(cuid())
+  affiliateId String
+  affiliate   Affiliate @relation(fields: [affiliateId], references: [id], onDelete: Cascade)
+  // USD
+  amount      Float
+  method      String
+  number      String
+  accountName String    @default("")
+  // requested | paid | rejected
+  status      String    @default("requested")
+  requestedAt DateTime  @default(now())
+  dueBy       DateTime
+  paidAt      DateTime?
+  bdtAmount   Float?
+  trxId       String    @default("")
+  adminNote   String    @default("")
+
+  @@index([affiliateId, status])
+}
+
+// Which affiliate a store came from, as the store itself reported it: the
+// referral link (cookie) or the code the merchant typed in the app. Gives the
+// store 7 extra trial days and is the strongest proof when checking a claim.
+model ShopReferral {
+  shop      String   @id
+  code      String
+  // link | code
+  source    String
+  createdAt DateTime @default(now())
+}

@@ -7,6 +7,8 @@ import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { BILLING_PLANS, FREE_PLAN, PLAN_FEATURES, PLAN_ORDER, billingPlan, type PlanName } from "../lib/plans";
 import { BILLING_TEST, cancelAllSubscriptions, forgetCachedPlan, getActiveSubscription } from "../models/billing.server";
+import { shopReferralOf } from "../models/affiliate.server";
+import { REFERRAL_TRIAL_BONUS } from "../lib/affiliate";
 
 const TAGLINES: Record<PlanName, string> = {
   Free: "Get the basics right",
@@ -17,8 +19,8 @@ const TAGLINES: Record<PlanName, string> = {
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   forgetCachedPlan(session.shop);
-  const { plan, key } = await getActiveSubscription(admin);
-  return { active: plan, activeKey: key, isTest: BILLING_TEST };
+  const [{ plan, key }, referral] = await Promise.all([getActiveSubscription(admin), shopReferralOf(session.shop)]);
+  return { active: plan, activeKey: key, isTest: BILLING_TEST, trialBonus: referral ? REFERRAL_TRIAL_BONUS : 0 };
 };
 
 /** Shopify's own reason, e.g. the app's distribution isn't set to public yet. */
@@ -49,7 +51,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
     if (!billingPlan(key)) return { error: "Unknown plan." };
     // On success this throws a redirect to Shopify's approval page.
-    await billing.request({ plan: key as never, isTest: BILLING_TEST });
+    // Stores that came through an affiliate get extra trial days.
+    const referral = await shopReferralOf(session.shop);
+    const trialDays = billingPlan(key)!.trialDays + (referral ? REFERRAL_TRIAL_BONUS : 0);
+    await billing.request({ plan: key as never, isTest: BILLING_TEST, trialDays } as never);
     return null;
   } catch (error) {
     if (error instanceof Response) throw error;
@@ -60,7 +65,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function PlansPage() {
-  const { active, activeKey, isTest } = useLoaderData<typeof loader>();
+  const { active, activeKey, isTest, trialBonus } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
   const shopify = useAppBridge();
@@ -91,7 +96,7 @@ export default function PlansPage() {
                     <Box>
                       <Text as="span" variant="heading2xl">{offer ? offer.price : "$0"}</Text>
                       <Text as="span" tone="subdued">{offer ? " / month" : ""}</Text>
-                      {offer && <Text as="p" variant="bodySm" tone="subdued">{offer.trialDays}-day free trial</Text>}
+                      {offer && <Text as="p" variant="bodySm" tone="subdued">{offer.trialDays + trialBonus}-day free trial</Text>}
                     </Box>
                     <List>
                       {PLAN_FEATURES[tier].map((f) => <List.Item key={f}>{f}</List.Item>)}

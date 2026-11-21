@@ -25,6 +25,9 @@ import { getUsage } from "../models/usage.server";
 import { ISSUES, parseIssues, scoreTone, type IssueCode } from "../lib/audit";
 import { RESOURCES, RESOURCE_LABEL } from "../lib/templates";
 import { can, formatLimit, limit, FEATURE_MIN_PLAN } from "../lib/plans";
+import { REFERRAL_TRIAL_BONUS } from "../lib/affiliate";
+import { shopReferralOf } from "../models/affiliate.server";
+import { ReferralCodeCard } from "../components/ReferralCodeCard";
 
 const FIX_LINK: Partial<Record<IssueCode, string>> = {
   title_missing: "/app/meta?issue=title_missing",
@@ -45,11 +48,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const plan = await getActivePlan(admin);
-  const [scan, items, usage, compressed] = await Promise.all([
+  const [scan, items, usage, compressed, referral] = await Promise.all([
     getScanState(shop),
     prisma.auditItem.findMany({ where: { shop }, select: { resource: true, issues: true, score: true } }),
     getUsage(shop),
     prisma.compressedImage.aggregate({ where: { shop, status: "compressed" }, _sum: { originalBytes: true, newBytes: true }, _count: true }),
+    shopReferralOf(shop),
   ]);
 
   const issueCounts: Partial<Record<IssueCode, number>> = {};
@@ -64,6 +68,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     plan,
+    referralCode: referral?.code ?? "",
+    trialBonus: REFERRAL_TRIAL_BONUS,
     scan,
     score,
     total: items.length,
@@ -251,6 +257,12 @@ export default function Dashboard() {
             </BlockStack>
           </Card>
         </Layout.Section>
+
+        {(data.plan === "Free" || data.referralCode) && (
+          <Layout.Section>
+            <ReferralCodeCard applied={data.referralCode} bonusDays={data.trialBonus} />
+          </Layout.Section>
+        )}
       </Layout>
     </Page>
   );
