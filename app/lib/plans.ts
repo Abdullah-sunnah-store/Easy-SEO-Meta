@@ -19,8 +19,8 @@ export const BILLING_PLANS: {
   price: string;
   trialDays: number;
 }[] = [
-  { key: "Basic", tier: "Basic", cycle: "monthly", amount: 9.99, price: "$9.99", trialDays: 7 },
-  { key: "Advanced", tier: "Advanced", cycle: "monthly", amount: 24.99, price: "$24.99", trialDays: 7 },
+  { key: "Basic", tier: "Basic", cycle: "monthly", amount: 9.99, price: "$9.99", trialDays: 14 },
+  { key: "Advanced", tier: "Advanced", cycle: "monthly", amount: 24.99, price: "$24.99", trialDays: 14 },
 ];
 
 export function billingPlan(key: string) {

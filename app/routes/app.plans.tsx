@@ -6,7 +6,7 @@ import { Page, Layout, Card, BlockStack, InlineGrid, InlineStack, Text, Button, 
 import { TitleBar, useAppBridge } from "@shopify/app-bridge-react";
 import { authenticate } from "../shopify.server";
 import { BILLING_PLANS, FREE_PLAN, PLAN_FEATURES, PLAN_ORDER, billingPlan, type PlanName } from "../lib/plans";
-import { BILLING_TEST, forgetCachedPlan, getActiveSubscription } from "../models/billing.server";
+import { BILLING_TEST, cancelAllSubscriptions, forgetCachedPlan, getActiveSubscription } from "../models/billing.server";
 
 const TAGLINES: Record<PlanName, string> = {
   Free: "Get the basics right",
@@ -35,15 +35,16 @@ function billingErrorText(error: any): string {
 }
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { billing, session } = await authenticate.admin(request);
+  const { admin, billing, session } = await authenticate.admin(request);
   forgetCachedPlan(session.shop);
   const key = String((await request.formData()).get("plan"));
   try {
     if (key === FREE_PLAN) {
-      const { appSubscriptions } = await billing.check({ plans: BILLING_PLANS.map((p) => p.key) as never[], isTest: BILLING_TEST });
-      for (const sub of appSubscriptions ?? []) {
-        await billing.cancel({ subscriptionId: sub.id, isTest: BILLING_TEST, prorate: true });
-      }
+      // Straight from the Admin API: billing.check() filters by isTest, so on a
+      // review/development store it found no "real" charge and cancelled nothing.
+      const error = await cancelAllSubscriptions(admin);
+      forgetCachedPlan(session.shop);
+      if (error) return { error: `Shopify said: ${error}` };
       return redirect("/app/plans");
     }
     if (!billingPlan(key)) return { error: "Unknown plan." };

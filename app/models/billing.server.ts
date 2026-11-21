@@ -98,3 +98,45 @@ export async function getActivePlanCached(shop: string, admin: AdminClient): Pro
 export function forgetCachedPlan(shop: string) {
   planCache.delete(shop);
 }
+
+/**
+ * Cancels every active subscription this app has on the shop — the "Downgrade
+ * to Free" action.
+ *
+ * Reads the subscriptions straight from the Admin API instead of going through
+ * billing.check(): check() filters by the isTest flag, so on a development or
+ * review store (where Shopify issues test charges) a production build asked
+ * only for real charges, found none, cancelled nothing, and the merchant stayed
+ * on the paid plan (App Store review 1.2.2). Test or not, every active
+ * subscription is cancelled here, and a failure is reported instead of hidden.
+ */
+export async function cancelAllSubscriptions(admin: AdminClient): Promise<string | null> {
+  const listed = await admin.graphql(
+    `#graphql
+    query SeoSubscriptionsToCancel {
+      currentAppInstallation { activeSubscriptions { id status } }
+    }`,
+  );
+  const body: any = await listed.json();
+  const ids: string[] = (body?.data?.currentAppInstallation?.activeSubscriptions ?? [])
+    .filter((s: any) => s?.id && s?.status !== "CANCELLED")
+    .map((s: any) => s.id);
+
+  for (const id of ids) {
+    const res = await admin.graphql(
+      `#graphql
+      mutation SeoCancelSubscription($id: ID!) {
+        appSubscriptionCancel(id: $id, prorate: true) {
+          appSubscription { id status }
+          userErrors { field message }
+        }
+      }`,
+      { variables: { id } },
+    );
+    const out: any = await res.json();
+    const errors = out?.data?.appSubscriptionCancel?.userErrors ?? [];
+    if (out?.errors?.length) return out.errors.map((e: any) => e.message).join(" ");
+    if (errors.length) return errors.map((e: any) => e.message).join(" ");
+  }
+  return null;
+}
