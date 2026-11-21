@@ -9,7 +9,7 @@ import {
   addBusinessDays,
   cleanCode,
   codeFromName,
-  commissionFor,
+  commissionForCycle,
   isMyshopify,
   normalizeStore,
 } from "../lib/affiliate";
@@ -177,6 +177,7 @@ export type StoreCheck = {
   installed: boolean;
   plan: string; // Free | Basic | Advanced | ""
   price: number;
+  cycle: "monthly" | "yearly";
   test: boolean;
   inTrial: boolean;
   trialEnds: string;
@@ -215,6 +216,7 @@ export async function checkStore(storeInput: string): Promise<StoreCheck> {
     installed: false,
     plan: "",
     price: 0,
+    cycle: "monthly",
     test: false,
     inTrial: false,
     trialEnds: "",
@@ -269,6 +271,7 @@ export async function checkStore(storeInput: string): Promise<StoreCheck> {
     const trialEnd = new Date(new Date(sub.createdAt).getTime() + Number(sub.trialDays || 0) * 86_400_000);
     result.plan = tier;
     result.price = price;
+    result.cycle = billingPlan(sub.name)?.cycle ?? (/year/i.test(sub.name) ? "yearly" : "monthly");
     result.test = Boolean(sub.test);
     result.inTrial = trialEnd.getTime() > Date.now();
     result.trialEnds = Number(sub.trialDays) > 0 ? trialEnd.toISOString() : "";
@@ -315,7 +318,7 @@ export async function accrueReferral(referralId: string): Promise<{ added: numbe
   if (exists) return { added: 0, message: `Already added for the cycle ending ${period}.`, check };
 
   const paidBefore = await prisma.affiliateCommission.count({ where: { referralId: referral.id, kind: { in: ["first", "recurring"] } } });
-  const { rate, amount } = commissionFor(check.price, paidBefore === 0);
+  const { rate, amount } = commissionForCycle(check.price, paidBefore === 0, check.cycle);
   try {
     await prisma.affiliateCommission.create({
       data: {
@@ -326,14 +329,14 @@ export async function accrueReferral(referralId: string): Promise<{ added: numbe
         rate,
         baseAmount: check.price,
         amount,
-        note: `${check.plan} $${check.price} — cycle ending ${period}`,
+        note: `${check.plan} ${check.cycle} $${check.price} — cycle ending ${period}`,
       },
     });
   } catch {
     // Unique (referralId, period): added by a parallel run.
     return { added: 0, message: `Already added for the cycle ending ${period}.`, check };
   }
-  return { added: amount, message: `Added ${Math.round(rate * 100)}% = $${amount.toFixed(2)} for the cycle ending ${period}.`, check };
+  return { added: amount, message: `Added ${(rate * 100).toFixed(rate * 100 % 1 ? 1 : 0)}% = $${amount.toFixed(2)} for the ${check.cycle} cycle ending ${period}.`, check };
 }
 
 /** Runs accrueReferral over every approved referral. */

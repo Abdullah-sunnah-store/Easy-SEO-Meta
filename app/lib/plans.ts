@@ -21,7 +21,21 @@ export const BILLING_PLANS: {
 }[] = [
   { key: "Basic", tier: "Basic", cycle: "monthly", amount: 9.99, price: "$9.99", trialDays: 14 },
   { key: "Advanced", tier: "Advanced", cycle: "monthly", amount: 24.99, price: "$24.99", trialDays: 14 },
+  { key: "Basic Yearly", tier: "Basic", cycle: "yearly", amount: 99.99, price: "$99.99", trialDays: 14 },
+  { key: "Advanced Yearly", tier: "Advanced", cycle: "yearly", amount: 249.99, price: "$249.99", trialDays: 14 },
 ];
+
+/** The sellable subscription for a tier and billing cycle. */
+export function offerFor(tier: string, cycle: BillingCycle) {
+  return BILLING_PLANS.find((p) => p.tier === tier && p.cycle === cycle);
+}
+
+/** Whole-percent saving of paying yearly instead of 12 monthly payments. */
+export function yearlySaving(tier: string): number {
+  const m = offerFor(tier, "monthly")?.amount ?? 0;
+  const y = offerFor(tier, "yearly")?.amount ?? 0;
+  return m > 0 && y > 0 ? Math.round((1 - y / (m * 12)) * 100) : 0;
+}
 
 export function billingPlan(key: string) {
   return BILLING_PLANS.find((p) => p.key === key);

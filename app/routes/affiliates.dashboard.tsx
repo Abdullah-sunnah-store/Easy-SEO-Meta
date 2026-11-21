@@ -444,7 +444,7 @@ export default function AffiliateDashboard() {
                 headings={["Date", "Type", "Details", "Amount"]}
                 rows={data.commissions.map((c) => [
                   day(c.createdAt),
-                  c.kind === "first" ? "First payment (50%)" : c.kind === "recurring" ? "Monthly (10%)" : "Adjustment",
+                  c.kind === "first" ? "First payment" : c.kind === "recurring" ? "Renewal (10%)" : "Adjustment",
                   c.note,
                   usd(c.amount),
                 ])}

@@ -53,6 +53,18 @@ export function commissionFor(price: number, isFirst: boolean) {
   return { rate, amount: Math.round(Math.round(price * 100) * rate) / 100 };
 }
 
+/**
+ * Commission for one paid billing cycle of a given length. A yearly payment
+ * counts as 12 months: the first year pays FIRST_RATE of one month plus
+ * RECURRING_RATE of the other eleven; every renewal pays RECURRING_RATE.
+ */
+export function commissionForCycle(price: number, isFirst: boolean, cycle: "monthly" | "yearly") {
+  if (cycle !== "yearly") return commissionFor(price, isFirst);
+  const cents = Math.round(price * 100);
+  const rate = isFirst ? (FIRST_RATE + 11 * RECURRING_RATE) / 12 : RECURRING_RATE;
+  return { rate, amount: Math.round(cents * rate) / 100 };
+}
+
 export function usd(n: number) {
   return `$${(Math.round(n * 100) / 100).toFixed(2)}`;
 }

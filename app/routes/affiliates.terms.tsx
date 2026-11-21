@@ -35,6 +35,10 @@ export default function AffiliateTerms() {
               after that, for as long as the store keeps paying.
             </List.Item>
             <List.Item>
+              Yearly plans count as 12 months: for the first year you get {first}% of one month and {recurring}% of the
+              other eleven (about 13% of the yearly price), then {recurring}% of every yearly renewal.
+            </List.Item>
+            <List.Item>
               Commission is worked out from the plan price the store pays. Free-trial days, free plans, development
               stores and test charges earn nothing.
             </List.Item>

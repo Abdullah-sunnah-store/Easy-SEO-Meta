@@ -374,7 +374,7 @@ function CheckResult({ check }: { check: StoreCheck | null }) {
       <InlineStack gap="200">
         <Badge tone="success">Installed</Badge>
         <Badge tone={check.plan && check.plan !== "Free" ? "success" : "attention"}>{check.plan || "unknown"}</Badge>
-        {check.price > 0 && <Badge>{`$${check.price}/cycle`}</Badge>}
+        {check.price > 0 && <Badge>{`$${check.price}/${check.cycle === "yearly" ? "year" : "month"}`}</Badge>}
         {check.test && <Badge tone="critical">Test charge</Badge>}
         {check.inTrial && <Badge tone="info">{`In trial until ${day(check.trialEnds)}`}</Badge>}
       </InlineStack>
