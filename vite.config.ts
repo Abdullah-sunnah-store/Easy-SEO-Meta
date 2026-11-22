@@ -73,7 +73,12 @@ export default defineConfig({
         v3_fetcherPersist: true,
         v3_relativeSplatPath: true,
         v3_throwAbortReason: true,
-        v3_lazyRouteDiscovery: true,
+        // Off: with lazy discovery the browser looks routes up one by one,
+        // and clicking Speed test in the admin menu failed that lookup and
+        // showed "404 Not Found" (opening the URL directly worked). The app
+        // has a dozen routes, so sending the whole route list up front costs
+        // nothing.
+        v3_lazyRouteDiscovery: false,
         v3_singleFetch: false,
         v3_routeConfig: true,
       },
