@@ -29,8 +29,8 @@ import { SpeedError, isPasswordProtected, parseOpportunities, resolveCustomUrl, 
 import { can, formatLimit, limit, FEATURE_MIN_PLAN } from "../lib/plans";
 import { UpgradeNotice } from "../components/UpgradeNotice";
 
-// A PageSpeed run takes 10–40 s at Google.
-export const config = { maxDuration: 60 };
+// A PageSpeed run takes 10–40 s at Google; the 60 s limit is set for the
+// whole app in root.tsx (a per-route config splits the server bundle).
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
