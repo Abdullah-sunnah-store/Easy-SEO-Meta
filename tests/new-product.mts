@@ -1,3 +1,4 @@
+import { limit } from "../app/lib/plans";
 import assert from "node:assert";
 import prisma from "../app/db.server";
 import { autoFillNewProduct } from "../app/models/newProduct.server";
@@ -64,9 +65,9 @@ assert.equal(r.wrote, "template");
 assert.equal(val("gid://shopify/Product/5", "title_tag"), "Linen Shirt | Acme Store");
 assert.equal((await prisma.usage.findFirst({ where: { shop } }))!.aiGenerations, 1);
 
-// Free plan has 10 AI writes; when used up → template
+// Free plan AI writes used up → template
 geminiDelay = 0;
-await prisma.usage.updateMany({ where: { shop }, data: { aiGenerations: 10 } });
+await prisma.usage.updateMany({ where: { shop }, data: { aiGenerations: limit("Free", "aiGenerations") } });
 r = await autoFillNewProduct({ ...base, plan: "Free", settings: { templates, autoMetaAi: true }, productId: "gid://shopify/Product/6" });
 assert.equal(r.wrote, "template");
 console.log("ALL NEW PRODUCT TESTS PASSED");

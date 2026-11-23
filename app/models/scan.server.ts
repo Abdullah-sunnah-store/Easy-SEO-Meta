@@ -290,6 +290,13 @@ async function finalize(shop: string, admin: AdminClient, scannedAll: boolean) {
   }
 }
 
+/** Whether some resource type stopped at the plan's cap (so the audit is partial). */
+async function anyTypeCapped(shop: string, cap: number): Promise<boolean> {
+  if (cap < 0) return false;
+  const counts = await prisma.auditItem.groupBy({ by: ["resource"], where: { shop }, _count: { _all: true } });
+  return counts.some((c) => c._count._all >= cap);
+}
+
 /** Does one step's worth of scanning and returns the new state. */
 export async function runScanStep(shop: string, admin: AdminClient, plan: PlanName): Promise<ScanState> {
   let run = await prisma.auditRun.findUnique({ where: { shop } });
@@ -302,19 +309,20 @@ export async function runScanStep(shop: string, admin: AdminClient, plan: PlanNa
       const phase = run.phase as (typeof PHASES)[number];
       if (phase === "done") break;
       if (phase === "finalize") {
-        await finalize(shop, admin, run.cap < 0 || run.scanned < run.cap);
+        await finalize(shop, admin, run.cap < 0 || !(await anyTypeCapped(shop, run.cap)));
         run = await prisma.auditRun.update({ where: { shop }, data: { phase: "done", status: "done", finishedAt: new Date() } });
         break;
       }
-      // Free plan audits products only; and stops at its item cap.
-      const capped = run.cap >= 0 && run.scanned >= run.cap;
-      if (capped || (phase !== "product" && !can(plan, "allResources"))) {
-        run = await prisma.auditRun.update({ where: { shop }, data: { phase: "finalize", cursor: "" } });
+      // The cap applies to each resource type on its own (100 products, 100
+      // collections, ...); a type that hits it moves on to the next type.
+      const cap: number = run.cap;
+      const done: number = cap >= 0 ? await prisma.auditItem.count({ where: { shop, resource: phase } }) : 0;
+      if ((cap >= 0 && done >= cap) || (phase !== "product" && !can(plan, "allResources"))) {
+        const skipTo = can(plan, "allResources") ? PHASES[PHASES.indexOf(phase) + 1] : "finalize";
+        run = await prisma.auditRun.update({ where: { shop }, data: { phase: skipTo, cursor: "" } });
         continue;
       }
       hosts ??= await shopHosts(admin);
-      const cap: number = run.cap;
-      const done: number = run.scanned;
       const first: number = cap >= 0 ? Math.max(1, Math.min(PAGE, cap - done)) : PAGE;
       const data: any = await gql(admin, QUERIES[phase], { first, after: run.cursor || null });
       const conn: any = data?.[CONNECTION[phase]];

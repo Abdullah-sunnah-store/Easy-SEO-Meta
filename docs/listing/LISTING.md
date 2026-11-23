@@ -54,7 +54,7 @@ SEO audit and score for products, collections, pages and blog posts
 AI-written SEO titles and meta descriptions, single or bulk
 AI alt text that describes each product image
 Image compression with automatic backup and one-click restore
-Auto 301 redirects, broken link finder and llms.txt for AI search
+Google rich results schema, auto 301 redirects and llms.txt for AI search
 ```
 
 **Feature media** → `feature-image-1600x900.png`

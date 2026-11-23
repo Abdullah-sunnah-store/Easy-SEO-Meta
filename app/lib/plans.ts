@@ -41,12 +41,13 @@ export function billingPlan(key: string) {
   return BILLING_PLANS.find((p) => p.key === key);
 }
 
-/** -1 = unlimited. Monthly counters reset on the 1st (UTC). */
+/** -1 = unlimited. Monthly counters reset on the 1st (UTC).
+ *  auditItems caps each resource type separately (products, collections, pages, blog posts). */
 export const PLAN_LIMITS: Record<
   PlanName,
   { auditItems: number; metaEdits: number; altEdits: number; compressions: number; aiGenerations: number; speedTests: number }
 > = {
-  Free: { auditItems: 100, metaEdits: 50, altEdits: 50, compressions: 25, aiGenerations: 10, speedTests: 0 },
+  Free: { auditItems: 100, metaEdits: 50, altEdits: 50, compressions: 25, aiGenerations: 50, speedTests: 0 },
   Basic: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 1000, aiGenerations: 300, speedTests: 60 },
   Advanced: { auditItems: -1, metaEdits: -1, altEdits: -1, compressions: 5000, aiGenerations: 1000, speedTests: 300 },
 };
@@ -57,23 +58,26 @@ export type Feature =
   | "handleRedirects" // 301 when a product handle changes
   | "brokenLinks" // broken internal link report + one-click redirect
   | "allResources" // audit collections, pages and articles too
-  | "speedTest"; // Google PageSpeed tests of storefront pages
+  | "speedTest" // Google PageSpeed tests of storefront pages
+  | "schemaPlus"; // Article + collection (ItemList) structured data
 
 export const FEATURE_MIN_PLAN: Record<Feature, PlanName> = {
   autoMeta: PLANS.BASIC,
   csvRedirects: PLANS.BASIC,
   handleRedirects: PLANS.BASIC,
-  allResources: PLANS.BASIC,
+  allResources: FREE_PLAN,
   brokenLinks: PLANS.ADVANCED,
   speedTest: PLANS.BASIC,
+  schemaPlus: PLANS.BASIC,
 };
 
 // What each plan card lists. Every line must be a feature that works today.
 export const PLAN_FEATURES: Record<PlanName, string[]> = {
   Free: [
-    "SEO audit & score (up to 100 products)",
+    "SEO audit & score: products, collections, pages & blog posts (100 of each)",
     "Meta title & description editor",
-    "10 AI-written titles & descriptions / month",
+    "50 AI-written titles & descriptions / month",
+    "Google rich results schema: product, breadcrumbs, organization, site search",
     "50 template meta edits / month",
     "50 image alt texts / month",
     "25 image compressions / month",
@@ -82,8 +86,9 @@ export const PLAN_FEATURES: Record<PlanName, string[]> = {
   ],
   Basic: [
     "Everything in Free",
-    "Audit products, collections, pages & blog posts",
+    "Unlimited audit of every product, collection, page & blog post",
     "Unlimited bulk meta & alt text",
+    "Blog article & collection schema for rich results",
     "300 AI-written titles & descriptions / month",
     "Auto meta & alt for new products (templates or AI)",
     "Auto 301 when a product URL changes",

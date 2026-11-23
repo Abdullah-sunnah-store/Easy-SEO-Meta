@@ -139,6 +139,18 @@ export default function Dashboard() {
 
   const start = () => fetcher.submit({ intent: "start" }, { method: "POST" });
 
+  // First visit: run the audit straight away, so the score and the first
+  // fixes are on screen without the merchant having to find a button.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (!data.scan && !autoStarted.current && fetcher.state === "idle") {
+      autoStarted.current = true;
+      start();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const quickWins = data.issues.slice(0, 3);
+
   return (
     <Page>
       <TitleBar title="Easy SEO & Meta" />
@@ -162,7 +174,7 @@ export default function Dashboard() {
               {running && (
                 <BlockStack gap="200">
                   <Text as="p">{PHASE_LABEL[scan!.phase] ?? "Scanning"} — {scan!.scanned.toLocaleString()} checked</Text>
-                  <ProgressBar progress={Math.min(95, scan!.cap > 0 ? (scan!.scanned / scan!.cap) * 100 : (["product", "collection", "page", "article", "finalize"].indexOf(scan!.phase) + 1) * 19)} />
+                  <ProgressBar progress={Math.min(95, scan!.cap > 0 ? (scan!.scanned / (scan!.cap * 4)) * 100 : (["product", "collection", "page", "article", "finalize"].indexOf(scan!.phase) + 1) * 19)} />
                 </BlockStack>
               )}
               {scan?.status === "failed" && <Banner tone="critical">The audit stopped: {scan.error}. Run it again to retry.</Banner>}
@@ -176,8 +188,8 @@ export default function Dashboard() {
               )}
               {data.limits.auditItems >= 0 && (
                 <Text as="p" variant="bodySm" tone="subdued">
-                  The Free plan audits your first {data.limits.auditItems} products.{" "}
-                  <Link to="/app/plans">Upgrade</Link> to audit every product, collection, page and blog post.
+                  The Free plan audits up to {data.limits.auditItems} products, collections, pages and blog posts each.{" "}
+                  <Link to="/app/plans">Upgrade</Link> for an unlimited audit.
                 </Text>
               )}
             </BlockStack>
@@ -202,11 +214,54 @@ export default function Dashboard() {
           </Layout.Section>
         )}
 
+        {quickWins.length > 0 && !running && (
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="300">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">Start here: {quickWins.length === 1 ? "your quickest win" : `${quickWins.length} quick wins`}</Text>
+                  <Text as="p" tone="subdued">These fixes lift your score the most. Most take one click with AI or a template.</Text>
+                </BlockStack>
+                <InlineGrid columns={{ xs: 1, md: quickWins.length }} gap="300">
+                  {quickWins.map((issue, i) => (
+                    <Box key={issue.code} padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text as="span" variant="bodySm" tone="subdued">{`Step ${i + 1}`}</Text>
+                        <Text as="p" fontWeight="semibold">{issue.label}</Text>
+                        <Text as="p" variant="bodySm">{`${issue.count.toLocaleString()} to fix. ${issue.fix}`}</Text>
+                        <InlineStack>
+                          <Button variant={i === 0 ? "primary" : "secondary"} url={issue.link}>Fix now</Button>
+                        </InlineStack>
+                      </BlockStack>
+                    </Box>
+                  ))}
+                </InlineGrid>
+              </BlockStack>
+            </Card>
+          </Layout.Section>
+        )}
+
+        {data.total > 0 && !running && (
+          <Layout.Section>
+            <Card>
+              <InlineStack align="space-between" blockAlign="center" gap="300">
+                <BlockStack gap="100">
+                  <Text as="h2" variant="headingMd">Google rich results</Text>
+                  <Text as="p" tone="subdued">
+                    Add product schema so Google can show price, stock and star ratings next to your listing. Free on every plan.
+                  </Text>
+                </BlockStack>
+                <Button url="/app/schema">Set up schema</Button>
+              </InlineStack>
+            </Card>
+          </Layout.Section>
+        )}
+
         {data.issues.length > 0 && (
           <Layout.Section>
             <Card>
               <BlockStack gap="300">
-                <Text as="h2" variant="headingMd">Issues to fix</Text>
+                <Text as="h2" variant="headingMd">All issues</Text>
                 {data.issues.map((issue, i) => (
                   <BlockStack key={issue.code} gap="200">
                     {i > 0 && <Divider />}

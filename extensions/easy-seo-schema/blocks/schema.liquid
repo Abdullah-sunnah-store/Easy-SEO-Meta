@@ -1,0 +1,248 @@
+{%- comment -%}
+  Easy SEO & Meta — structured data (JSON-LD) for Google rich results.
+  Free: Product, BreadcrumbList, Organization, WebSite (site search).
+  Basic and Advanced: also Article (blog posts) and ItemList (collections).
+  The app keeps shop.metafields.easy_seo.plan up to date.
+{%- endcomment -%}
+{%- liquid
+  assign es_plan = shop.metafields.easy_seo.plan.value | default: 'Free'
+  assign es_paid = false
+  if es_plan == 'Basic' or es_plan == 'Advanced'
+    assign es_paid = true
+  endif
+  assign es_base = request.origin | default: shop.url
+  assign es_currency = cart.currency.iso_code | default: shop.currency
+-%}
+
+{%- if block.settings.organization and request.page_type == 'index' -%}
+  {%- capture es_same_as -%}
+    {%- assign es_links = block.settings.same_as | newline_to_br | split: '<br />' -%}
+    {%- assign es_first = true -%}
+    {%- for es_l in es_links -%}
+      {%- assign es_u = es_l | strip -%}
+      {%- if es_u contains 'http' -%}
+        {%- unless es_first -%},{%- endunless -%}{{ es_u | json }}
+        {%- assign es_first = false -%}
+      {%- endif -%}
+    {%- endfor -%}
+  {%- endcapture -%}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": {{ es_base | append: '/#organization' | json }},
+      "name": {{ shop.name | json }},
+      "url": {{ es_base | json }}
+      {%- if block.settings.logo != blank -%},
+      "logo": {{ block.settings.logo | image_url: width: 600 | prepend: 'https:' | json }}
+      {%- endif -%}
+      {%- if shop.email != blank -%},
+      "email": {{ shop.email | json }}
+      {%- endif -%}
+      {%- if es_same_as != blank -%},
+      "sameAs": [{{ es_same_as }}]
+      {%- endif %}
+    }
+  </script>
+{%- endif -%}
+
+{%- if block.settings.website and request.page_type == 'index' -%}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": {{ es_base | append: '/#website' | json }},
+      "name": {{ shop.name | json }},
+      "url": {{ es_base | json }},
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": {{ es_base | append: routes.search_url | append: '?q={search_term_string}' | json }}
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+  </script>
+{%- endif -%}
+
+{%- if block.settings.product and request.page_type == 'product' and product -%}
+  {%- liquid
+    assign es_variant = product.selected_or_first_available_variant
+    assign es_rating = product.metafields.reviews.rating.value
+    assign es_count = product.metafields.reviews.rating_count.value | default: 0
+    assign es_desc = product.description | replace: '</', ' </' | replace: '<br', ' <br' | strip_html | newline_to_br | replace: '<br />', ' ' | strip_newlines | strip | truncate: 5000
+    if es_desc == blank
+      assign es_desc = product.title
+    endif
+    assign es_valid_until = 'now' | date: '%s' | plus: 31536000 | date: '%Y-12-31'
+  -%}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      "@id": {{ canonical_url | append: '#product' | json }},
+      "name": {{ product.title | json }},
+      "url": {{ canonical_url | json }},
+      "description": {{ es_desc | json }},
+      {%- capture es_images -%}
+        {%- assign es_first = true -%}
+        {%- for es_m in product.media limit: 10 -%}
+          {%- if es_m.preview_image -%}
+            {%- unless es_first -%},{%- endunless -%}
+            {{ es_m.preview_image | image_url: width: 1200 | prepend: 'https:' | json }}
+            {%- assign es_first = false -%}
+          {%- endif -%}
+        {%- endfor -%}
+      {%- endcapture -%}
+      {%- if es_images != blank %}
+      "image": [{{ es_images }}],
+      {%- endif %}
+      {%- if product.vendor != blank %}
+      "brand": { "@type": "Brand", "name": {{ product.vendor | json }} },
+      {%- endif %}
+      {%- if es_variant.sku != blank %}
+      "sku": {{ es_variant.sku | json }},
+      {%- endif %}
+      {%- if es_variant.barcode != blank %}
+      "gtin": {{ es_variant.barcode | json }},
+      {%- endif %}
+      {%- if product.type != blank %}
+      "category": {{ product.type | json }},
+      {%- endif %}
+      {%- if es_rating and es_count > 0 %}
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": {{ es_rating.rating | json }},
+        "bestRating": {{ es_rating.scale_max | json }},
+        "worstRating": {{ es_rating.scale_min | json }},
+        "reviewCount": {{ es_count | json }}
+      },
+      {%- endif %}
+      "offers": [
+        {%- for es_v in product.variants limit: 50 -%}
+          {
+            "@type": "Offer",
+            {%- if es_v.sku != blank %}"sku": {{ es_v.sku | json }},{% endif %}
+            {%- if es_v.barcode != blank %}"gtin": {{ es_v.barcode | json }},{% endif %}
+            "name": {{ es_v.title | json }},
+            "price": {{ es_v.price | divided_by: 100.0 | json }},
+            "priceCurrency": {{ es_currency | json }},
+            "priceValidUntil": {{ es_valid_until | json }},
+            "itemCondition": "https://schema.org/NewCondition",
+            "availability": {% if es_v.available %}"https://schema.org/InStock"{% else %}"https://schema.org/OutOfStock"{% endif %},
+            "url": {{ es_base | append: es_v.url | json }},
+            "seller": { "@type": "Organization", "name": {{ shop.name | json }} }
+          }{% unless forloop.last %},{% endunless %}
+        {%- endfor -%}
+      ]
+    }
+  </script>
+{%- endif -%}
+
+{%- if block.settings.breadcrumbs and request.page_type != 'index' -%}
+  {%- capture es_crumbs -%}
+    {"@type": "ListItem", "position": 1, "name": {{ 'Home' | json }}, "item": {{ es_base | json }}}
+    {%- assign es_pos = 1 -%}
+    {%- case request.page_type -%}
+      {%- when 'product' -%}
+        {%- if collection -%}
+          {%- assign es_pos = es_pos | plus: 1 -%}
+          ,{"@type": "ListItem", "position": {{ es_pos }}, "name": {{ collection.title | json }}, "item": {{ es_base | append: collection.url | json }}}
+        {%- endif -%}
+        {%- assign es_pos = es_pos | plus: 1 -%}
+        ,{"@type": "ListItem", "position": {{ es_pos }}, "name": {{ product.title | json }}, "item": {{ canonical_url | json }}}
+      {%- when 'collection' -%}
+        {%- assign es_pos = es_pos | plus: 1 -%}
+        ,{"@type": "ListItem", "position": {{ es_pos }}, "name": {{ collection.title | json }}, "item": {{ canonical_url | json }}}
+      {%- when 'article' -%}
+        {%- assign es_pos = es_pos | plus: 1 -%}
+        ,{"@type": "ListItem", "position": {{ es_pos }}, "name": {{ blog.title | json }}, "item": {{ es_base | append: blog.url | json }}}
+        {%- assign es_pos = es_pos | plus: 1 -%}
+        ,{"@type": "ListItem", "position": {{ es_pos }}, "name": {{ article.title | json }}, "item": {{ canonical_url | json }}}
+      {%- when 'blog' -%}
+        {%- assign es_pos = es_pos | plus: 1 -%}
+        ,{"@type": "ListItem", "position": {{ es_pos }}, "name": {{ blog.title | json }}, "item": {{ canonical_url | json }}}
+      {%- when 'page' -%}
+        {%- assign es_pos = es_pos | plus: 1 -%}
+        ,{"@type": "ListItem", "position": {{ es_pos }}, "name": {{ page.title | json }}, "item": {{ canonical_url | json }}}
+    {%- endcase -%}
+  {%- endcapture -%}
+  {%- if es_pos > 1 -%}
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": [{{ es_crumbs }}]
+      }
+    </script>
+  {%- endif -%}
+{%- endif -%}
+
+{%- if es_paid and block.settings.article and request.page_type == 'article' and article -%}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      "@id": {{ canonical_url | append: '#article' | json }},
+      "mainEntityOfPage": {{ canonical_url | json }},
+      "headline": {{ article.title | truncate: 110 | json }},
+      "description": {{ article.excerpt_or_content | replace: '</', ' </' | strip_html | newline_to_br | replace: '<br />', ' ' | strip_newlines | strip | truncate: 300 | json }},
+      {%- if article.image %}
+      "image": [{{ article.image | image_url: width: 1200 | prepend: 'https:' | json }}],
+      {%- endif %}
+      "datePublished": {{ article.published_at | date: '%Y-%m-%dT%H:%M:%S%z' | json }},
+      "dateModified": {{ article.updated_at | date: '%Y-%m-%dT%H:%M:%S%z' | json }},
+      "author": { "@type": "Person", "name": {{ article.author | default: shop.name | json }} },
+      "publisher": {
+        "@type": "Organization",
+        "name": {{ shop.name | json }}
+        {%- if block.settings.logo != blank -%},
+        "logo": { "@type": "ImageObject", "url": {{ block.settings.logo | image_url: width: 600 | prepend: 'https:' | json }} }
+        {%- endif %}
+      }
+    }
+  </script>
+{%- endif -%}
+
+{%- if es_paid and block.settings.collection and request.page_type == 'collection' and collection -%}
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "name": {{ collection.title | json }},
+      "url": {{ canonical_url | json }},
+      "mainEntity": {
+        "@type": "ItemList",
+        "itemListElement": [
+          {%- for es_p in collection.products limit: 24 -%}
+            {"@type": "ListItem", "position": {{ forloop.index }}, "url": {{ es_base | append: es_p.url | json }}, "name": {{ es_p.title | json }}}{% unless forloop.last %},{% endunless %}
+          {%- endfor -%}
+        ]
+      }
+    }
+  </script>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Easy SEO schema",
+  "target": "head",
+  "settings": [
+    {
+      "type": "paragraph",
+      "content": "Adds structured data so Google can show price, stock and star ratings in search results."
+    },
+    { "type": "checkbox", "id": "product", "label": "Product schema", "default": true, "info": "Price, stock, brand, SKU and star ratings from your reviews app." },
+    { "type": "checkbox", "id": "breadcrumbs", "label": "Breadcrumb schema", "default": true },
+    { "type": "checkbox", "id": "organization", "label": "Organization schema (home page)", "default": true },
+    { "type": "checkbox", "id": "website", "label": "Site search schema (home page)", "default": true },
+    { "type": "header", "content": "Basic and Advanced plans" },
+    { "type": "checkbox", "id": "article", "label": "Blog article schema", "default": true },
+    { "type": "checkbox", "id": "collection", "label": "Collection schema", "default": true },
+    { "type": "header", "content": "Your brand" },
+    { "type": "image_picker", "id": "logo", "label": "Logo", "info": "Shown by Google next to your brand. Square or wide, at least 112px." },
+    { "type": "textarea", "id": "same_as", "label": "Social profile links", "info": "One link per line, for example https://www.instagram.com/yourstore" }
+  ]
+}
+{% endschema %}

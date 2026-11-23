@@ -7,11 +7,15 @@ import polarisStyles from "@shopify/polaris/build/esm/styles.css?url";
 
 import { authenticate } from "../shopify.server";
 import { attributeShop, refCookie } from "../models/affiliate.server";
+import { syncSchemaPlan } from "../models/schema.server";
 
 export const links = () => [{ rel: "stylesheet", href: polarisStyles }];
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { admin, session } = await authenticate.admin(request);
+
+  // The schema embed reads the plan from a shop metafield.
+  await syncSchemaPlan(admin);
 
   // Came through an affiliate link (/r/CODE)? Credit the store once.
   try {
@@ -23,6 +27,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return { apiKey: process.env.SHOPIFY_API_KEY?.trim() || "" };
 };
+
+// The layout's data (API key, plan sync) only needs loading once per page
+// load, not on every in-app navigation.
+export const shouldRevalidate = () => false;
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
@@ -36,6 +44,7 @@ export default function App() {
         <Link to="/app/meta">Meta tags</Link>
         <Link to="/app/alt">Image alt text</Link>
         <Link to="/app/images">Image compression</Link>
+        <Link to="/app/schema">Rich results (schema)</Link>
         <Link to="/app/redirects">Redirects &amp; links</Link>
         <Link to="/app/speed">Speed test</Link>
         <Link to="/app/llms">llms.txt</Link>

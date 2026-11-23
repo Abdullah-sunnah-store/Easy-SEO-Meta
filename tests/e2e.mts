@@ -70,12 +70,20 @@ assert.equal(normalisePath("https://other.com/products/x", ["acme.com"]), null);
 assert.equal(normalisePath("/collections/all", []), null);
 assert.equal(parseRedirectCsv("Redirect from,Redirect to\n/a,/b\nbad,/c\n/d,").filter((r) => !r.error).length, 1);
 
-// ---- Free plan scan: products only, capped at 100 → 55 products, no broken-link verdicts? (all products scanned < cap so scannedAll=true)
+// ---- Free plan scan: every resource type, each capped at 100 → 55 products + 3 others
 for (const m of ["shopSettings","auditRun","auditItem","auditImage","linkRef","productHandle","usage","compressedImage","redirectLog"]) await (prisma as any)[m].deleteMany({ where: { shop } });
 let s = await startScan(shop, "Free");
 for (let i = 0; i < 20 && s.status === "running"; i++) s = await runScanStep(shop, admin, "Free");
-assert.equal(s.status, "done"); assert.equal(s.scanned, 55);
-assert.equal(await prisma.auditItem.count({ where: { shop, resource: { not: "product" } } }), 0, "free = products only");
+assert.equal(s.status, "done"); assert.equal(s.scanned, 58);
+assert.equal(await prisma.auditItem.count({ where: { shop, resource: { not: "product" } } }), 3, "free audits collections, pages and posts too");
+
+// ---- the cap is per resource type: a lower cap stops products but still scans the rest
+s = await startScan(shop, "Free");
+await prisma.auditRun.update({ where: { shop }, data: { cap: 20 } });
+for (let i = 0; i < 20 && s.status === "running"; i++) s = await runScanStep(shop, admin, "Free");
+assert.equal(s.status, "done");
+assert.equal(await prisma.auditItem.count({ where: { shop, resource: "product" } }), 20, "products capped at 20");
+assert.equal(await prisma.auditItem.count({ where: { shop, resource: { not: "product" } } }), 3, "other types still scanned");
 
 // ---- Advanced scan: everything + finalize
 s = await startScan(shop, "Advanced");
