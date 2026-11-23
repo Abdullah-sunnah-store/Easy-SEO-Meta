@@ -12,6 +12,7 @@
   endif
   assign es_base = request.origin | default: shop.url
   assign es_currency = cart.currency.iso_code | default: shop.currency
+  assign es_search_template = es_base | append: routes.search_url | append: '?q={search_term_string}'
 -%}
 
 {%- if block.settings.organization and request.page_type == 'index' -%}
@@ -58,7 +59,7 @@
         "@type": "SearchAction",
         "target": {
           "@type": "EntryPoint",
-          "urlTemplate": {{ es_base | append: routes.search_url | append: '?q={search_term_string}' | json }}
+          "urlTemplate": {{ es_search_template | json }}
         },
         "query-input": "required name=search_term_string"
       }
